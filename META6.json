@@ -30,7 +30,7 @@
   },
   "resources": [
   ],
-  "source-url": "https://github.com/FCO/nats.git",
+  "source-url": "https://github.com/FCO/nats.raku.git",
   "tags": [
   ],
   "test-depends": [

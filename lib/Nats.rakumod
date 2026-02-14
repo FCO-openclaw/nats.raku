@@ -15,6 +15,7 @@ has URL()    @.servers   = self.default-url;
 has Promise  $!conn     .= new;
 has Supplier $!supplier .= new;
 has Supply   $.supply    = $!supplier.Supply;
+has Bool()   $.headers-supported = False;
 
 has Bool() $!DEBUG = %*ENV<NATS_DEBUG>;
 
@@ -60,7 +61,19 @@ method handle-input {
                         when "err"  { die $cmd.data      }
                         when "ping" { self!print: "PONG" }
                         when "pong" {                    }
-                        when "info" {                    }
+                        when "info" {
+                            my %info = $cmd.data;
+                            $!DEBUG && self!debug("INFO", to-json %info);
+                            if %info<headers>:exists { $!headers-supported = %info<headers> ?? True !! False }
+                            if %info<connect_urls>:exists {
+                                my @urls = %info<connect_urls>.
+                                    map({ $_ ~~ /':'/ && $_ !~~ /^'nats://' /
+                                        ?? "nats://$_"
+                                        !! $_ }).
+                                    map({ URL.new: .Str });
+                                @!servers = @urls if @urls.elems;
+                            }
+                        }
                     }
                 }
                 when Nats::Message { $!supplier.emit: $_ }
@@ -98,16 +111,28 @@ method !gen-inbox {
     $inbox
 }
 
-method request(
-    Str   $subject,
-    Str() $payload?,
-    Str   :$reply-to     = self!gen-inbox,
-    UInt  :$max-messages = 1,
-) {
-    my $sub = self.subscribe: $reply-to, :$max-messages;
-    self.publish: $subject, |(.Str with $payload), :$reply-to;
-    $sub.supply.head: $max-messages;
-}
+ method request(
+     Str   $subject,
+     Str() $payload?,
+     Str   :$reply-to     = self!gen-inbox,
+     UInt  :$max-messages = 1,
+     :header(:%headers),
+ ) {
+     # Subscribe to a unique inbox and publish the request; always return a Supply
+     my $sub = self.subscribe: $reply-to, |($max-messages ?? :$max-messages !! Empty);
+     self.publish: $subject, |(.Str with $payload), :$reply-to,
+         |( %headers.elems ?? :header(:%headers) !! Empty );
+     my $s = $sub.supply;
+     return $s unless $max-messages;
+     supply {
+         my UInt $count = 0;
+         whenever $s -> $msg {
+             emit $msg;
+             $count++;
+             done if $count >= $max-messages;
+         }
+     }
+ }
 
 multi method unsubscribe(Nats::Subscription $sub, UInt :$max-messages) {
     self.unsubscribe: $sub.sid, |(:$max-messages with $max-messages)
@@ -118,8 +143,59 @@ multi method unsubscribe(UInt $sid, UInt :$max-messages) {
     %!subs{$sid}:delete;
 }
 
-method publish(Str $subject, Str() $payload = "", Str :$reply-to) {
+method publish(
+    Str   $subject,
+    Str() $payload = "",
+    Str   :$reply-to,
+          :header(:%headers),
+    Bool  :$ack = False,
+    Str   :$msg-id,
+    UInt  :$timeout = 5,
+) {
+    return self!publish-with-ack: $subject, $payload, $msg-id, :$timeout if $ack;
+    %headers && %headers.elems
+        ?? self!hpub($subject, $payload, :%headers, :$reply-to)
+        !! self!pub($subject, $payload, :$reply-to)
+}
+
+method !publish-with-ack(
+    Str   $subject,
+    Str() $payload = "",
+    Str   :$msg-id,
+    UInt  :$timeout = 5,
+) {
+    # Publish and wait for JetStream PubAck by using request semantics
+    # Include Nats-Msg-Id when provided for de-duplication
+    my %headers;
+    %headers<"Nats-Msg-Id"> = $msg-id if $msg-id.defined && $msg-id.chars;
+    my $reply = self.request: $subject, $payload, :max-messages(1),
+        |( %headers.elems ?? :header(:%headers) !! Empty );
+    my $p = Promise.new;
+    $reply.tap: -> $msg { $p.keep: $msg };
+    await $p
+}
+
+method !pub(Str $subject, Str() $payload = "", Str :$reply-to) {
     self!print: "PUB", $subject, $reply-to // Empty, "{ $payload.chars }\r\n$payload";
+}
+
+method !hpub(
+    Str   $subject,
+    Str() $payload = "",
+    :%headers,
+    Str   :$reply-to,
+) {
+    my @lines = ("NATS/1.0", |(%headers.kv.map: -> $k, $v {
+        $v ~~ Positional
+            ?? $v.map({ "{ $k }: { $_ }" })
+            !! "{ $k }: { $v }"
+    }).flat);
+    my $headers-lines = @lines.join("\r\n");
+    my $headers-block = $headers-lines ~ "\r\n\r\n"; # includes CRLFCRLF
+    my $payload-str   = $payload // "";
+    my UInt $hsize    = $headers-block.encode('utf8').bytes; # per spec includes delimiter
+    my UInt $tsize    = $hsize + $payload-str.encode('utf8').bytes;
+    self!print: "HPUB", $subject, $reply-to // Empty, $hsize, "$tsize\r\n$headers-block$payload-str\r\n";
 }
 
 method stream($name, *@subjects, |c) {
