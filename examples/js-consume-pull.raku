@@ -28,11 +28,12 @@ say "starting pull loop";
 # Pull and print messages in repeated batches until we see at least 15
 my $seen = 0;
 react {
-    whenever $c.msgs {
-        say "PAYLOAD: ", .payload;
-        .ack;
-        say ++$seen;
-        done if $seen >= 15
+    # Pull first 15 messages; skip status/no-message frames
+    whenever $c.msgs: :15batch, :no-wait -> $msg {
+        next unless $msg.payload.defined && $msg.payload.chars;
+        say "PAYLOAD: ", $msg.payload;
+        if $msg.^can('ack') { $msg.ack }
+        done if ++$seen >= 15
     }
 }
 

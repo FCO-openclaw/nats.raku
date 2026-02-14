@@ -147,22 +147,24 @@ class Nats::Consumer {
         $!nats.request: $subject, to-json %req.Map
     }
 
-    method msgs(UInt :$expires, Bool :$no-wait) {
-        my %payload = 
-            |(:no_wait => True                      if $no-wait);
-            |(expires => ($expires * 1_000_000_000) if $expires);
+    method msgs(UInt :$expires, Bool :$no-wait, UInt :$batch) {
+        # Build payload explicitly to avoid slips and ensure proper JSON
+        my %payload;
+        %payload<no_wait> = True if $no-wait;
+        %payload<expires> = $expires * 1_000_000_000 if $expires;
+        %payload<batch>   = $batch if $batch && $batch > 0;
 
         my $subj = $.subject: CONSUMER-MSG-NEXT, $!stream, $!name;
 
         supply {
             if $expires {
-                whenever Promise.in: $expires { done }
+                whenever Promise.in($expires) { done }
             }
             loop {
                 # Send JSON payload as required by JetStream API
                 my $req = $!nats.request:
                     $subj,
-                    to-json(%payload // %()),
+                    to-json(%payload.elems ?? %payload !! %()),
                 ;
                 emit await $req
             }
