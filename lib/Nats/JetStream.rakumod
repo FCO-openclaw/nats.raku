@@ -1,122 +1,54 @@
 use JSON::Fast;
 
-# Constantes principais
-constant JS = '$JS';
-constant JS-API = JS ~ '.API';
-constant JS-ACK = JS ~ '.ACK';
+unit class Nats::JetStream;
 
-# Stream Subjects
-constant STREAM-CREATE     = JS-API ~ '.STREAM.CREATE.%s';
-constant STREAM-INFO       = JS-API ~ '.STREAM.INFO.%s';
-constant STREAM-DELETE     = JS-API ~ '.STREAM.DELETE.%s';
-constant STREAM-LIST       = JS-API ~ '.STREAM.LIST';
+has $.nats where { .^can('publish') && .^can('request') };
+has Str $.prefix = '$JS.API';
 
-# Consumer Subjects
-constant CONSUMER-CREATE   = JS-API ~ '.CONSUMER.CREATE.%s.%s';
-constant CONSUMER-INFO     = JS-API ~ '.CONSUMER.INFO.%s.%s';
-constant CONSUMER-DELETE   = JS-API ~ '.CONSUMER.DELETE.%s.%s';
-constant CONSUMER-MSG-NEXT = JS-API ~ '.CONSUMER.MSG.NEXT.%s.%s';
-
-sub to-map($obj, *%pars --> Map()) {
-    $obj.^attributes.map: -> $attr {
-        my $name = $attr.name.substr(2).subst: /_/, "-", :g;
-        next if %pars{$name}:e &&!%pars{$name};
-        my $val = $attr.get_value: $obj;
-        next unless $val ~~ Str | Int | Positional | Associative | Nil;
-        $name => $val
+#| Wrapper to send JSON payloads to JetStream API endpoints and parse the response
+method api-request(Str $subject, $payload = %()) {
+    my $full-subject = "$!prefix.$subject";
+    my $resp-msg = await $!nats.request($full-subject, to-json($payload));
+    
+    return do given $resp-msg {
+        when .defined {
+            my $data = from-json(.payload);
+            # JS API returns errors in the JSON payload under 'error'
+            fail "JetStream API Error: $data<error><description>" if $data<error>;
+            $data;
+        }
+        default {
+            fail "No response from JetStream API at $full-subject";
+        }
     }
 }
 
-class Nats::Consumer {...}
-
-class Nats::Stream {
-
-    has       $.nats is required;
-    has Str() $.name is required;
-    has Str() @.subjects,
-    has Str() $.retention = 'limits',
-    has Str() $.storage = 'file',
-    has Int() $.max-msgs = -1,
-    has Int() $.max-bytes = -1,
-    has Int() $.max-age = 0,
-
-    #enum RetentionPolicy <limits interest work_queue>;
-    #enum DiscardPolicy <old new>;
-    #enum StorageType <file memory any>;
-    ##enum Placement <>;
-    #enum StoreCompression <none s2>;
-    #
-    #has $.nats;
-    #
-    #has Str              $!name                     is required;
-    #has Str              @!subjects                 is required;
-    #has Str              $!description;
-    #has RetentionPolicy  $!retention;
-    #has Int              $!max-consumers;
-    #has Int              $!max-msgs;
-    #has Int              $!max-bytes;
-    #has Int              $!max-age;
-    #has Int              $!max-msgs-per-subject;
-    #has Int              $!max-msg-size;
-    #has DiscardPolicy    $!discard;
-    #has StorageType      $!storage;
-    #has Int              $!num-replicas;
-    #has Bool             $!no-ack;
-    #has Str              $!template-owner;
-    #has Int              $!duplicate-window;
-    ##has Placement        $!placement;
-    #has                  %!mirror;
-    #has Associative      @!sources;
-    #has StoreCompression $!compression;
-    #has UInt             $!first-seq;
-
-    method subject(Str $template, Str $stream? --> Str) {
-        sprintf $template, |(.Str with $stream)
-    }
-
-    method create   { $!nats.request: $.subject(STREAM-CREATE, $!name), to-json self.&to-map }
-    method info     { $!nats.request: $.subject(STREAM-INFO, $!name)   }
-    method delete   { $!nats.request: $.subject(STREAM-DELETE, $!name) }
-    method list     { $!nats.request: $.subject(STREAM-LIST)           }
-    method consumer(Str $name, |c) { Nats::Consumer.new: |c, :$!nats, :$name, :stream($!name) }
+#| Info on a specific stream
+method stream-info(Str $stream-name) {
+    self.api-request("STREAM.INFO.$stream-name");
 }
 
-class Nats::Consumer {
-    has     $.nats is required;
-    has Str $.name is required;
-    has Str $.stream is required;
-    has Str $.durable-name = $!name,
-    has Str $.deliver-policy  = 'all',
-    has Str $.ack-policy      = 'explicit',
-    has Str $.filter-subject,
-    has Int $.ack-wait        = 30,
-    has Int $.max-deliver     = -1,
-    has Int $.max-ack-pending = 100,
-    has Str $.replay-policy   = "instant",
-    has Int $.num-replicas    = 0,
+#| Add a new stream
+method add-stream(Str $stream-name, :@subjects) {
+    self.api-request("STREAM.CREATE.$stream-name", {
+        name => $stream-name,
+        subjects => @subjects
+    });
+}
 
-    method config(--> Map()) {
-        :stream_name($!stream),
-        :config{
-            :ack_policy($!ack-policy),
-            :deliver_policy($!deliver-policy),
-            :durable_name($!durable-name),
-            :$!name,
-            :max_ack_pending($!max-ack-pending),
-            :max_deliver($!max-deliver),
-            :replay_policy($!replay-policy),
-            :num_replicas($!num-replicas),
-        },
-        :action(""),
-    }
+#| Info on a specific consumer
+method consumer-info(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.INFO.$stream-name.$consumer-name");
+}
 
-    method subject(Str $template, Str $stream, Str $consumer? --> Str) {
-        sprintf $template, $stream, |(.Str with $consumer)
-    }
-
-    method create { $!nats.request: $.subject(CONSUMER-CREATE, $!stream, $!name), to-json self.config }
-    method next   { $!nats.request: $.subject(CONSUMER-MSG-NEXT, $!stream, $!name) }
-
-    #sub consumer-info     { $.subject(CONSUMER-INFO, $!stream)      }
-    #sub consumer-delete   { $.subject(CONSUMER-DELETE,)             }
+#| Add a new consumer to a stream
+method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$deliver-subject, :$ack-policy = "explicit") {
+    my %config = name => $consumer-name, ack_policy => $ack-policy;
+    %config<filter_subject> = $filter-subject if $filter-subject;
+    %config<deliver_subject> = $deliver-subject if $deliver-subject;
+    
+    self.api-request("CONSUMER.CREATE.$stream-name.$consumer-name", {
+        stream_name => $stream-name,
+        config => %config
+    });
 }

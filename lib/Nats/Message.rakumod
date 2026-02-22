@@ -1,5 +1,7 @@
 use JSON::Fast;
 use Nats::Replyable;
+use Nats::JetStream::Ackable;
+
 unit class Nats::Message;
 
 has Str  $.subject;
@@ -8,7 +10,13 @@ has Str  $.payload;
 has      $.nats where { .^can('publish') }
 
 method TWEAK(Str :$reply-to) {
-    self does Nats::Replyable($reply-to) if $reply-to && self !~~ Nats::Replyable;
+    if $reply-to {
+        if $reply-to.starts-with('$JS.ACK.') {
+            self does Nats::JetStream::Ackable($reply-to) if self !~~ Nats::JetStream::Ackable;
+        } else {
+            self does Nats::Replyable($reply-to) if self !~~ Nats::Replyable;
+        }
+    }
 }
 
 method json() {
