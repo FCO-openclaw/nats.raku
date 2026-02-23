@@ -41,7 +41,8 @@ method consumer-info(Str $stream-name, Str $consumer-name) {
     self.api-request("CONSUMER.INFO.$stream-name.$consumer-name");
 }
 
-#| Add a new consumer to a stream
+#| Add a new consumer to a stream (Push or Pull).
+#| Provide :$deliver-subject for Push Consumer, pass none for Pull Consumer.
 method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$deliver-subject, :$ack-policy = "explicit") {
     my %config = name => $consumer-name, ack_policy => $ack-policy;
     %config<filter_subject> = $filter-subject if $filter-subject;
@@ -51,4 +52,24 @@ method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$de
         stream_name => $stream-name,
         config => %config
     });
+}
+
+#| Pull Consumer: fetch a batch of messages actively
+method fetch(Str $stream-name, Str $consumer-name, Int :$batch = 1, Int :$expires?, Bool :$no-wait?) {
+    my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
+    
+    my %payload = (batch => $batch);
+    %payload<expires> = $expires if $expires;
+    %payload<no_wait> = True if $no-wait;
+
+    my $resp-msg = await $!nats.request($full-subject, to-json(%payload));
+    
+    return do given $resp-msg {
+        when .defined {
+            $resp-msg;
+        }
+        default {
+            Nil;
+        }
+    }
 }

@@ -1,0 +1,44 @@
+use Test;
+use Test::Mock;
+use Nats::JetStream;
+use JSON::Fast;
+
+plan 3;
+
+class MockMessage {
+    has Str $.payload;
+    has Str $.reply-to;
+}
+
+class MockNats {
+    has %!requests;
+    
+    method publish(Str $subject, Str $payload) { True }
+
+    method request(Str $subject, Str $payload) {
+        %!requests{$subject} = $payload;
+        # Simulando uma resposta do NATS para o Pull Request (retorna a mensagem em si)
+        my $response = MockMessage.new(
+            payload => '{"foo": "bar"}', 
+            reply-to => '$JS.ACK.EVENTS.WORKER_2.1.2.3'
+        );
+        Promise.kept($response);
+    }
+    
+    method last-request { %!requests }
+}
+
+my $mock-nats = MockNats.new;
+my $js = Nats::JetStream.new(nats => $mock-nats);
+
+# Test: Fetching a message (Pull Consumer)
+my $msg = $js.fetch("EVENTS", "WORKER_2", batch => 1);
+
+like $mock-nats.last-request{'$JS.API.CONSUMER.MSG.NEXT.EVENTS.WORKER_2'}, 
+     rx/ '"batch"' \s* ':' \s* 1 /, 
+     "Pull request sent to correct subject with batch size JSON";
+
+ok $msg.defined, "Received a pulled message from the consumer";
+is $msg.payload, '{"foo": "bar"}', "Payload of the pulled message is correct";
+
+done-testing;
