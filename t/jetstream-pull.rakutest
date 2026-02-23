@@ -29,6 +29,8 @@ class MockNats {
         # (This avoids complex internal NATS mocking and focuses on $js.fetch logic)
         class MockSub { 
             has $.supply; 
+            has $.sid = 42;
+            has Str $.subject = "MOCK_SUBJ";
         }.new(supply => Supply.from-list([$response]))
     }
 
@@ -40,11 +42,11 @@ class MockNats {
 my $mock-nats = MockNats.new;
 my $js = Nats::JetStream.new(nats => $mock-nats);
 
-# Test: Fetching messages (Pull Consumer returning a Supply)
-my $fetch-supply = $js.fetch("EVENTS", "WORKER_2", batch => 2);
-isa-ok $fetch-supply, Supply, "fetch() returns a Supply object";
+# Test: Fetching messages (Pull Consumer returning a Nats::Subscription)
+my $fetch-sub = $js.fetch("EVENTS", "WORKER_2", batch => 2);
+isa-ok $fetch-sub, Nats::Subscription, "fetch() returns a Nats::Subscription object";
 
-my $msg = await $fetch-supply.Promise; # Await the first element of the supply
+my $msg = await $fetch-sub.supply.Promise; # Await the first element of the supply
 
 like $mock-nats.last-request{'$JS.API.CONSUMER.MSG.NEXT.EVENTS.WORKER_2'}, 
      rx/ '"batch"' \s* ':' \s* 2 /, 
