@@ -1,4 +1,5 @@
 use JSON::Fast;
+use Nats::JetStream::Subscription;
 
 unit class Nats::JetStream;
 
@@ -69,52 +70,52 @@ method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$de
 }
 
 #| Pull Consumer: fetch a given batch of messages actively. Single-shot query.
+#| Pull Consumer: fetch a given batch of messages actively. Single-shot query.
 multi method fetch(Str $stream-name, Str $consumer-name, Int :$batch!, Int :$expires?, Bool :$no-wait?) {
     my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
     my $inbox = $!nats.gen-inbox();
     
-    my %payload = (batch => $batch);
+    my %payload = (:$batch);
     %payload<expires> = $expires if $expires;
     %payload<no_wait> = True if $no-wait;
     
     my $sub = $!nats.subscribe($inbox, max-messages => $batch);
     $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
-    $sub.supply;
+    
+    Nats::JetStream::Subscription.new(
+        sid => $sub.sid,
+        subject => $sub.subject,
+        supply => $sub.supply,
+        nats => $!nats,
+        batch => $batch,
+        continuous => False
+    );
 }
 
-#| Pull Consumer: fetch messages continuously, looping infinitely using chunks of 100.
+#| Pull Consumer: fetch messages continuously via wildcard (*) batch
+multi method fetch(Str $stream-name, Str $consumer-name, Whatever :$batch!, Int :$expires?, Bool :$no-wait?) {
+    self.fetch($stream-name, $consumer-name, :$expires, :$no-wait);
+}
+
+#| Continuous polling mode wrapper. Yields a Nats::JetStream::Subscription built from batch sizes.
 multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires?, Bool :$no-wait?) {
-    my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
-    my $inbox = $!nats.gen-inbox();
-    
     my $chunk-size = 100;
-    my %payload = (batch => $chunk-size);
-    %payload<expires> = $expires if $expires;
-    %payload<no_wait> = True if $no-wait;
-
-    # Keep subscription alive indefinitely (no max-messages)
-    my $sub = $!nats.subscribe($inbox);
     
-    my $supplier = Supplier.new;
-    my $messages-in-chunk = 0;
-
-    $sub.supply.tap(-> $msg {
-        $supplier.emit($msg);
-        $messages-in-chunk++;
-        
-        # When we deplete the current requested chunk, we ask the server for more
-        if $messages-in-chunk == $chunk-size {
-            $messages-in-chunk = 0;
-            $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+    my $supply = supply {
+        loop {
+            my $current-sub = self.fetch($stream-name, $consumer-name, batch => $chunk-size, :$expires, :$no-wait);
+            whenever $current-sub.supply -> $msg {
+                emit $msg;
+            }
         }
-    }, done => {
-        $supplier.done;
-    }, quit => {
-        $supplier.quit($_);
-    });
-
-    # Bootstrap the very first request
-    $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
-
-    $supplier.Supply;
+    };
+    
+    Nats::JetStream::Subscription.new(
+        sid => 0, # Continuous stream masks multiple internal subscriptions
+        subject => $stream-name, # For continuous polling, use stream as identification
+        supply => $supply,
+        nats => $!nats,
+        batch => $chunk-size,
+        continuous => True
+    );
 }
