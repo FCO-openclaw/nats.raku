@@ -8,9 +8,21 @@ has Str $.prefix = '$JS.API';
 #| Wrapper to send JSON payloads to JetStream API endpoints and parse the response
 method api-request(Str $subject, $payload = %()) {
     my $full-subject = "$!prefix.$subject";
-    my $supply = $!nats.request($full-subject, to-json($payload));
-    # The MOP handles Nats request correctly as returning a Seq of promises or direct objects
-    my $resp-msg = do { my $val = $supply[0]; $val ~~ Promise ?? await $val !! $val };
+    
+    my $prom = Promise.new;
+    my $res = $!nats.request($full-subject, to-json($payload));
+    if $res ~~ Supply {
+        $res.head(1).tap(
+            -> $msg { $prom.keep($msg) },
+            done => { $prom.keep(Any) unless $prom.status }
+        );
+    } else {
+        # Fallback if it returned a Seq directly
+        $prom.keep($res[0]);
+    }
+    
+    my $resp-msg = await $prom;
+    $resp-msg = await $resp-msg if $resp-msg ~~ Promise;
     
     return do given $resp-msg {
         when .defined {
@@ -57,19 +69,54 @@ method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$de
 }
 
 #| Pull Consumer: fetch a batch of messages actively
-#| Returns a Raku Supply that yields $batch Nats::Message items asynchronously.
-method fetch(Str $stream-name, Str $consumer-name, Int :$batch = 1, Int :$expires?, Bool :$no-wait?) {
+#| Returns a Raku Supply that yields Nats::Message items asynchronously.
+#| If no :batch is supplied, it loops infinitely (continuous polling mode) using chunks of 100.
+#| If :batch is supplied, it behaves in a single-shot query and closes the supply after N messages.
+method fetch(Str $stream-name, Str $consumer-name, Int :$batch, Int :$expires?, Bool :$no-wait?) {
     my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
-    
-    my %payload = (batch => $batch);
-    %payload<expires> = $expires if $expires;
-    %payload<no_wait> = True if $no-wait;
-
-    # Fetch handles the inbox generator and returns the underlying message Supply
     my $inbox = $!nats.gen-inbox();
-    my $sub = $!nats.subscribe($inbox, max-messages => $batch);
-    $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
     
-    # Return the supply directly for continuous or discrete polling
-    $sub.supply;
+    if $batch.defined {
+        # Single-shot fetch
+        my %payload = (batch => $batch);
+        %payload<expires> = $expires if $expires;
+        %payload<no_wait> = True if $no-wait;
+        
+        my $sub = $!nats.subscribe($inbox, max-messages => $batch);
+        $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+        return $sub.supply;
+    } else {
+        # Continuous streaming fetch over a unified Supply
+        my $chunk-size = 100;
+        my %payload = (batch => $chunk-size);
+        %payload<expires> = $expires if $expires;
+        %payload<no_wait> = True if $no-wait;
+
+        # Keep subscription alive indefinitely (no max-messages)
+        my $sub = $!nats.subscribe($inbox);
+        
+        my $supplier = Supplier.new;
+        my $messages-in-chunk = 0;
+
+        # Tap the underlying subscription to relay messages and trigger the next chunk request
+        $sub.supply.tap(-> $msg {
+            $supplier.emit($msg);
+            $messages-in-chunk++;
+            
+            # Whenever we deplete the current requested chunk, we ask the server for more
+            if $messages-in-chunk == $chunk-size {
+                $messages-in-chunk = 0;
+                $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+            }
+        }, done => {
+            $supplier.done;
+        }, quit => {
+            $supplier.quit($_);
+        });
+
+        # Bootstrap the very first request
+        $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+
+        return $supplier.Supply;
+    }
 }

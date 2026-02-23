@@ -12,9 +12,9 @@ has      $.nats where { .^can('publish') }
 method TWEAK(Str :$reply-to) {
     if $reply-to {
         if $reply-to.starts-with('$JS.ACK.') {
-            self does Nats::JetStream::Ackable($reply-to) if self !~~ Nats::JetStream::Ackable;
+            self does Nats::JetStream::Ackable if self !~~ Nats::JetStream::Ackable;
         } else {
-            self does Nats::Replyable($reply-to) if self !~~ Nats::Replyable;
+            self does Nats::Replyable if self !~~ Nats::Replyable;
         }
     }
 }

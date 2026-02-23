@@ -15,6 +15,7 @@ class MockNats {
 }
 
 class MockMessage does Nats::JetStream::Ackable {
+    has $.nats;
 }
 
 my $mock-nats = MockNats.new;

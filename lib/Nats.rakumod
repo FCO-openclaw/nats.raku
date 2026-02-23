@@ -50,6 +50,7 @@ method stop {
 
 method handle-input {
     $!conn.result.Supply.tap: -> $line {
+        say "[RAW] $line";
         self!in($line);
         my @cmds = Nats::Grammar.parse($line, :actions(Nats::Actions.new: :nats(self))).ast;
         for @cmds -> $cmd {

@@ -2,10 +2,10 @@
 unit grammar Nats::Grammar;
 
 token subject {
-    [ \w+ ]+ %% '.'
+    [<-[ . \s ]>+]+ %% '.'
 }
 token TOP {
-    <msg-option>+ %% \n
+    <msg-option>+ %% \r? \n
 }
 token sid { \d+ }
 token size { \d+ }
@@ -17,11 +17,11 @@ token payload(UInt $size) {
     \n
 }
 proto token msg-option           { * }
-token msg-option:sym<OK>   { "+OK" }
-token msg-option:sym<ERR>  { "-ERR" \s+ $<err-msg>=[\N*] }
-token msg-option:sym<PING> { <.sym> }
-token msg-option:sym<PONG> { <.sym> }
-token msg-option:sym<INFO> { <.sym> \s+ $<info>=[\N*] }
+token msg-option:sym<OK>   { "+OK" \r? }
+token msg-option:sym<ERR>  { "-ERR" \s+ $<err-msg>=[\N*] \r? }
+token msg-option:sym<PING> { <.sym> \r? }
+token msg-option:sym<PONG> { <.sym> \r? }
+token msg-option:sym<INFO> { <.sym> \s+ $<info>=[\N*] \r? }
 token msg-option:sym<MSG>  {
     <.sym>    \s+
     <subject> \s+
@@ -29,7 +29,7 @@ token msg-option:sym<MSG>  {
     [
         <reply-to=.subject> \s+
     ]??
-    <size>    \n
+    <size>    \r? \n
     {}
     <payload(+$<size>)>
 }
