@@ -93,6 +93,7 @@ method subscribe(Str $subject, Str :$queue, UInt :$max-messages) {
 
 my @chars = |("a" .. "z"), |("A" .. "Z"), |("0" .. "9"), "_";
 
+method gen-inbox { self!gen-inbox }
 method !gen-inbox {
     my $inbox = "_INBOX." ~ (@chars.pick xx 32).join;
     $inbox

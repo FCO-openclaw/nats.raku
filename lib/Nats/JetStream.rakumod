@@ -8,7 +8,9 @@ has Str $.prefix = '$JS.API';
 #| Wrapper to send JSON payloads to JetStream API endpoints and parse the response
 method api-request(Str $subject, $payload = %()) {
     my $full-subject = "$!prefix.$subject";
-    my $resp-msg = await $!nats.request($full-subject, to-json($payload));
+    my $supply = $!nats.request($full-subject, to-json($payload));
+    # The MOP handles Nats request correctly as returning a Seq of promises or direct objects
+    my $resp-msg = do { my $val = $supply[0]; $val ~~ Promise ?? await $val !! $val };
     
     return do given $resp-msg {
         when .defined {
@@ -55,6 +57,7 @@ method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$de
 }
 
 #| Pull Consumer: fetch a batch of messages actively
+#| Returns a Raku Supply that yields $batch Nats::Message items asynchronously.
 method fetch(Str $stream-name, Str $consumer-name, Int :$batch = 1, Int :$expires?, Bool :$no-wait?) {
     my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
     
@@ -62,14 +65,11 @@ method fetch(Str $stream-name, Str $consumer-name, Int :$batch = 1, Int :$expire
     %payload<expires> = $expires if $expires;
     %payload<no_wait> = True if $no-wait;
 
-    my $resp-msg = await $!nats.request($full-subject, to-json(%payload));
+    # Fetch handles the inbox generator and returns the underlying message Supply
+    my $inbox = $!nats.gen-inbox();
+    my $sub = $!nats.subscribe($inbox, max-messages => $batch);
+    $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
     
-    return do given $resp-msg {
-        when .defined {
-            $resp-msg;
-        }
-        default {
-            Nil;
-        }
-    }
+    # Return the supply directly for continuous or discrete polling
+    $sub.supply;
 }

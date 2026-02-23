@@ -3,7 +3,7 @@ use Test::Mock;
 use Nats::JetStream;
 use JSON::Fast;
 
-plan 3;
+plan 4;
 
 class MockMessage {
     has Str $.payload;
@@ -13,32 +13,44 @@ class MockMessage {
 class MockNats {
     has %!requests;
     
-    method publish(Str $subject, Str $payload) { True }
-
-    method request(Str $subject, Str $payload) {
+    method publish(Str $subject, Str $payload, :$reply-to) { 
         %!requests{$subject} = $payload;
-        # Simulando uma resposta do NATS para o Pull Request (retorna a mensagem em si)
+        True 
+    }
+
+    method request(Str $subject, Str $payload, :$reply-to) {}
+
+    method subscribe(Str $inbox, :$max-messages) {
         my $response = MockMessage.new(
             payload => '{"foo": "bar"}', 
             reply-to => '$JS.ACK.EVENTS.WORKER_2.1.2.3'
         );
-        Promise.kept($response);
+        # Mocks a subscription object with a supply attribute 
+        # (This avoids complex internal NATS mocking and focuses on $js.fetch logic)
+        class MockSub { 
+            has $.supply; 
+        }.new(supply => Supply.from-list([$response]))
     }
-    
+
+    method gen-inbox() { '_INBOX.MOCK' }
+
     method last-request { %!requests }
 }
 
 my $mock-nats = MockNats.new;
 my $js = Nats::JetStream.new(nats => $mock-nats);
 
-# Test: Fetching a message (Pull Consumer)
-my $msg = $js.fetch("EVENTS", "WORKER_2", batch => 1);
+# Test: Fetching messages (Pull Consumer returning a Supply)
+my $fetch-supply = $js.fetch("EVENTS", "WORKER_2", batch => 2);
+isa-ok $fetch-supply, Supply, "fetch() returns a Supply object";
+
+my $msg = await $fetch-supply.Promise; # Await the first element of the supply
 
 like $mock-nats.last-request{'$JS.API.CONSUMER.MSG.NEXT.EVENTS.WORKER_2'}, 
-     rx/ '"batch"' \s* ':' \s* 1 /, 
+     rx/ '"batch"' \s* ':' \s* 2 /, 
      "Pull request sent to correct subject with batch size JSON";
 
-ok $msg.defined, "Received a pulled message from the consumer";
+ok $msg.defined, "Received a pulled message from the consumer Supply";
 is $msg.payload, '{"foo": "bar"}', "Payload of the pulled message is correct";
 
 done-testing;
