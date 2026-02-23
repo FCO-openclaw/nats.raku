@@ -68,55 +68,53 @@ method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$de
     });
 }
 
-#| Pull Consumer: fetch a batch of messages actively
-#| Returns a Raku Supply that yields Nats::Message items asynchronously.
-#| If no :batch is supplied, it loops infinitely (continuous polling mode) using chunks of 100.
-#| If :batch is supplied, it behaves in a single-shot query and closes the supply after N messages.
-method fetch(Str $stream-name, Str $consumer-name, Int :$batch, Int :$expires?, Bool :$no-wait?) {
+#| Pull Consumer: fetch a given batch of messages actively. Single-shot query.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$batch!, Int :$expires?, Bool :$no-wait?) {
     my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
     my $inbox = $!nats.gen-inbox();
     
-    if $batch.defined {
-        # Single-shot fetch
-        my %payload = (batch => $batch);
-        %payload<expires> = $expires if $expires;
-        %payload<no_wait> = True if $no-wait;
+    my %payload = (batch => $batch);
+    %payload<expires> = $expires if $expires;
+    %payload<no_wait> = True if $no-wait;
+    
+    my $sub = $!nats.subscribe($inbox, max-messages => $batch);
+    $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+    $sub.supply;
+}
+
+#| Pull Consumer: fetch messages continuously, looping infinitely using chunks of 100.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires?, Bool :$no-wait?) {
+    my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
+    my $inbox = $!nats.gen-inbox();
+    
+    my $chunk-size = 100;
+    my %payload = (batch => $chunk-size);
+    %payload<expires> = $expires if $expires;
+    %payload<no_wait> = True if $no-wait;
+
+    # Keep subscription alive indefinitely (no max-messages)
+    my $sub = $!nats.subscribe($inbox);
+    
+    my $supplier = Supplier.new;
+    my $messages-in-chunk = 0;
+
+    $sub.supply.tap(-> $msg {
+        $supplier.emit($msg);
+        $messages-in-chunk++;
         
-        my $sub = $!nats.subscribe($inbox, max-messages => $batch);
-        $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
-        return $sub.supply;
-    } else {
-        # Continuous streaming fetch over a unified Supply
-        my $chunk-size = 100;
-        my %payload = (batch => $chunk-size);
-        %payload<expires> = $expires if $expires;
-        %payload<no_wait> = True if $no-wait;
+        # When we deplete the current requested chunk, we ask the server for more
+        if $messages-in-chunk == $chunk-size {
+            $messages-in-chunk = 0;
+            $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+        }
+    }, done => {
+        $supplier.done;
+    }, quit => {
+        $supplier.quit($_);
+    });
 
-        # Keep subscription alive indefinitely (no max-messages)
-        my $sub = $!nats.subscribe($inbox);
-        
-        my $supplier = Supplier.new;
-        my $messages-in-chunk = 0;
+    # Bootstrap the very first request
+    $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
 
-        # Tap the underlying subscription to relay messages and trigger the next chunk request
-        $sub.supply.tap(-> $msg {
-            $supplier.emit($msg);
-            $messages-in-chunk++;
-            
-            # Whenever we deplete the current requested chunk, we ask the server for more
-            if $messages-in-chunk == $chunk-size {
-                $messages-in-chunk = 0;
-                $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
-            }
-        }, done => {
-            $supplier.done;
-        }, quit => {
-            $supplier.quit($_);
-        });
-
-        # Bootstrap the very first request
-        $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
-
-        return $supplier.Supply;
-    }
+    $supplier.Supply;
 }
