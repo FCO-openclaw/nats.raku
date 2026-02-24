@@ -3,8 +3,40 @@ on: [ push, pull_request ]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      nats:
+        image: nats:alpine
+        ports:
+          - 4222:4222
+          - 8222:8222
+        options: >-
+          --name nats-server
+          -e JS_ENABLED=true
+          -e JS_MAX_MEMORY_STORE=256MB
+          -e JS_MAX_FILE_STORE=1GB
+          --health-cmd "nats-server --print_config=check"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
+      - uses: actions/checkout@v3
+
+      - name: Verify NATS Server and JetStream
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nats-server
+          timeout 5 bash -c 'until nats server check --jetstream; do sleep 1; done'
+          echo "NATS Server with JetStream is running!"
+
       - name: Test + coverage
+        uses: JJ/raku-test-action@v2
         with:
           coverage: true
-        uses: JJ/raku-test-action@v2
+          
+      - name: Install Dependencies
+        run: |
+          zef install --/test Test::Mock
+          zef install --/test JSON::Fast
+          zef install --/test URL
+          zef install --/test --deps-only .
