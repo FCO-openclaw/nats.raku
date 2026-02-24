@@ -32,10 +32,71 @@ jobs:
         uses: JJ/raku-test-action@v2
         with:
           coverage: true
+          
+      - name: Install Dependencies
+        run: |
+          zef install --/test Test::Mock
+          zef install --/test JSON::Fast
+          zef install --/test URL
+          zef install --/test --deps-only .
 
       - name: Run E2E Tests with NATS+JetStream
         run: |
-          echo "Running NATS JetStream tests..."
+          echo "Running NATS JetStream unit tests..."
           export NATS_URL="nats://localhost:4222"
-          raku -I. test-pull.raku || echo "test-pull.raku failed"
-          raku -I. test-pull-continuous.raku || echo "test-pull-continuous.raku failed"
+          
+          # Run JetStream unit tests first
+          raku -I. t/jetstream-client.rakutest
+          raku -I. t/jetstream-ackable.rakutest
+          raku -I. t/jetstream-pull.rakutest
+          
+          # Create a minimal example to test real JetStream connectivity
+          cat > test-js-minimal.raku << 'EOF'
+          use v6;
+          use Nats;
+          use Nats::JetStream;
+          
+          my $nats = Nats.new(servers => ["nats://localhost:4222"]);
+          
+          my $p = start {
+              react whenever $nats.start {
+                  say "Connected to NATS server!";
+                  
+                  my $suffix = (^10000).pick;
+                  my $stream = "TEST_STREAM_$suffix";
+                  my $subject = "$stream.test";
+                  
+                  # Start a new thread for JetStream operations
+                  start {
+                      say "Creating JetStream client...";
+                      my $js = Nats::JetStream.new(:$nats);
+                      
+                      say "Adding stream $stream...";
+                      $js.add-stream($stream, subjects => [$subject]);
+                      
+                      say "Publishing message to $subject";
+                      $nats.publish($subject, '{"test": "data"}');
+                      
+                      # Give time for message to be stored
+                      sleep 1;
+                      
+                      say "Getting stream info...";
+                      my $info = $js.stream-info($stream);
+                      say "Stream info: $info";
+                      
+                      say "✅ JetStream basic test passed!";
+                      exit 0;
+                  }
+                  
+                  whenever Promise.in(10) {
+                      say "⏳ Timeout waiting for JetStream operations";
+                      exit 1;
+                  }
+              }
+          }
+          
+          await Promise.anyof($p, Promise.in(15));
+          EOF
+          
+          echo "Running simple JetStream connectivity test..."
+          timeout 20 raku -I. test-js-minimal.raku
