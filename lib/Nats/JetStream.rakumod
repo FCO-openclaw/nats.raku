@@ -70,7 +70,6 @@ method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$de
 }
 
 #| Pull Consumer: fetch a given batch of messages actively. Single-shot query.
-#| Pull Consumer: fetch a given batch of messages actively. Single-shot query.
 multi method fetch(Str $stream-name, Str $consumer-name, Int :$batch!, Int :$expires?, Bool :$no-wait?) {
     my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
     my $inbox = $!nats.gen-inbox();
@@ -97,16 +96,21 @@ multi method fetch(Str $stream-name, Str $consumer-name, Whatever :$batch!, Int 
     self.fetch($stream-name, $consumer-name, :$expires, :$no-wait);
 }
 
-#| Continuous polling mode wrapper. Yields a Nats::JetStream::Subscription built from batch sizes.
-multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires?, Bool :$no-wait?) {
+#| Continuous polling mode wrapper using expiration only. Yields a Nats::JetStream::Subscription built from batch sizes.
+# This version avoids busy looping by awaiting the completion of each batch and sleeping briefly if no messages are returned.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires? = 100, Bool :$no-wait?) {
     my $chunk-size = 100;
     
     my $supply = supply {
         loop {
-            my $current-sub = self.fetch($stream-name, $consumer-name, batch => $chunk-size, :$expires, :$no-wait);
+            my $current-sub = self.fetch($stream-name, $consumer-name, batch => $chunk-size, :$expires);
             whenever $current-sub.supply -> $msg {
                 emit $msg;
             }
+            # Await the completion of the current batch supply
+            await $current-sub.supply.done;
+            # Pause briefly to avoid a tight busy loop if no messages were received
+            sleep 0.1;
         }
     };
     
