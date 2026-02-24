@@ -45,8 +45,17 @@ jobs:
         with:
           coverage: true
           
-      - name: Install Dependencies
+      - name: Setup Raku Environment
         run: |
+          sudo apt-get update
+          sudo apt-get install -y rakudo
+          
+          # Instalar zef manualmente
+          git clone https://github.com/ugexe/zef.git
+          cd zef
+          raku -I. bin/zef install .
+          
+          # Instalar dependências
           zef install --/test Test::Mock
           zef install --/test JSON::Fast
           zef install --/test URL
