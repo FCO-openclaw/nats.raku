@@ -1,0 +1,23 @@
+#| Continuous polling mode wrapper using expiration only. Yields a Nats::JetStream::Subscription built from batch sizes.
+# Defaults: :$expires defaults to 100 ms if not provided.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires? = 100) {
+    my $chunk-size = 100;
+    
+    my $supply = supply {
+        loop {
+            my $current-sub = self.fetch($stream-name, $consumer-name, batch => $chunk-size, :$expires);
+            whenever $current-sub.supply -> $msg {
+                emit $msg;
+            }
+        }
+    };
+    
+    Nats::JetStream::Subscription.new(
+        sid => 0, # Continuous stream masks multiple internal subscriptions
+        subject => $stream-name,       
+        supply => $supply,
+        nats => $!nats,
+        batch => $chunk-size,
+        continuous => True
+    );
+}

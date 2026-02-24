@@ -1,7 +1,8 @@
 unit role Nats::JetStream::Ackable;
 
-has Str $.reply-to;
-has $.nats is required;
+# A classe principal deve ter esses atributos
+has $.reply-to;
+has $.nats;
 
 method ack() {
     fail "No reply-to subject for ACK" unless $!reply-to;

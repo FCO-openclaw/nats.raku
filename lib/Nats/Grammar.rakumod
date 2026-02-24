@@ -5,7 +5,7 @@ token subject {
     [<-[ . \s ]>+]+ %% '.'
 }
 token TOP {
-    <msg-option>+ %% \r? \n
+    <msg-option>+ %% [\r? \n]
 }
 token sid { \d+ }
 token size { \d+ }

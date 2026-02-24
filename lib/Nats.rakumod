@@ -48,7 +48,7 @@ multi method new(
         Nats::Auth::Base.new
     }
     
-    self.new(:$auth, |%args)
+    self.bless(:$auth, |%args)
 }
 
 method !pick-server {
@@ -93,7 +93,7 @@ method handle-input {
                         when "pong" {                    }
                         when "info" { 
                             # Store server info for auth and other purposes
-                            %!server-info = from-json($cmd.data);
+                            %!server-info = $cmd.data;
                             # After receiving server info, we can send the CONNECT
                             self.connect;
                         }

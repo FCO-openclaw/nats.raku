@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  nats-token:
+    image: nats:alpine
+    command: "-js --auth=test_token_123"
+    ports:
+      - "4222:4222"
+    networks:
+      - nats-test-network
+
+  nats-basic:
+    image: nats:alpine
+    command: "-js --user admin --pass password123"
+    ports:
+      - "4223:4222"
+    networks:
+      - nats-test-network
+
+  nats-jwt:
+    image: nats:alpine
+    volumes:
+      - ./jwt-config:/jwt-config
+    command: "-js --config /jwt-config/server.conf"
+    ports:
+      - "4224:4222"
+    networks:
+      - nats-test-network
+    
+  raku-test:
+    image: jjmerelo/alpine-raku:latest
+    volumes:
+      - ../:/app
+    working_dir: /app
+    command: tail -f /dev/null  # Keep container running
+    networks:
+      - nats-test-network
+    depends_on:
+      - nats-token
+      - nats-basic
+      - nats-jwt
+
+networks:
+  nats-test-network:
+    driver: bridge

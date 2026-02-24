@@ -1,0 +1,16 @@
+#| Continuous polling mode wrapper. Yields a single continuous supply built from batch sizes.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires?, Bool :$no-wait?) {
+    my $chunk-size = 100;
+    
+    # We create an outer supply block that loops indefinitely.
+    # Each loop awaits the completion of the current sub-fetch (which automatically closes after $batch msgs).
+    supply {
+        loop {
+            my $current-batch = self.fetch($stream-name, $consumer-name, batch => $chunk-size, :$expires, :$no-wait);
+            # `emit` yields the values from the batch to the main supply
+            whenever $current-batch -> $msg {
+                emit $msg;
+            }
+        }
+    }
+}
