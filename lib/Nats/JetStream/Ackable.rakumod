@@ -1,6 +1,7 @@
 unit role Nats::JetStream::Ackable;
 
 has Str $.reply-to;
+has $.nats is required;
 
 method ack() {
     fail "No reply-to subject for ACK" unless $!reply-to;
