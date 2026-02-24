@@ -8,6 +8,7 @@ use Nats::Data;
 use Nats::Message;
 use Nats::Subscription;
 use Nats::JetStream;
+use Nats::Auth;
 
 has $.socket-class       = IO::Socket::Async;
 has %!subs;
@@ -15,10 +16,40 @@ has URL()    @.servers   = self.default-url;
 has Promise  $!conn     .= new;
 has Supplier $!supplier .= new;
 has Supply   $.supply    = $!supplier.Supply;
+has Nats::Auth::Base $.auth = Nats::Auth::Base.new;
+has %!server-info;  # To store server info, including nonce for JWT auth
 
 has Bool() $!DEBUG = %*ENV<NATS_DEBUG>;
 
 method default-url { URL.new: %*ENV<NATS_URL> // "nats://127.0.0.1:4222" }
+
+# Constructor with auth support
+multi method new(
+    :$token, 
+    :$username, 
+    :$password, 
+    :$jwt-path, 
+    :$nkey-path,
+    :$nkey-seed,
+    *%args
+) {
+    # Create auth object if any auth params are provided
+    my $auth = do if $token.defined || $username.defined || $password.defined || 
+                   $jwt-path.defined || $nkey-path.defined || $nkey-seed.defined {
+        Nats::Auth::create-auth(
+            :$token, 
+            :$username, 
+            :$password, 
+            :$jwt-path, 
+            :$nkey-path,
+            :$nkey-seed
+        )
+    } else {
+        Nats::Auth::Base.new
+    }
+    
+    self.new(:$auth, |%args)
+}
 
 method !pick-server {
     @!servers.pick;
@@ -50,7 +81,6 @@ method stop {
 
 method handle-input {
     $!conn.result.Supply.tap: -> $line {
-        say "[RAW] $line";
         self!in($line);
         my @cmds = Nats::Grammar.parse($line, :actions(Nats::Actions.new: :nats(self))).ast;
         for @cmds -> $cmd {
@@ -61,7 +91,12 @@ method handle-input {
                         when "err"  { die $cmd.data      }
                         when "ping" { self!print: "PONG" }
                         when "pong" {                    }
-                        when "info" {                    }
+                        when "info" { 
+                            # Store server info for auth and other purposes
+                            %!server-info = from-json($cmd.data);
+                            # After receiving server info, we can send the CONNECT
+                            self.connect;
+                        }
                     }
                 }
                 when Nats::Message { $!supplier.emit: $_ }
@@ -71,7 +106,26 @@ method handle-input {
 }
 
 method connect {
-    self!print: "CONNECT", to-json :!pretty, %();
+    my %connect-params = %(
+        verbose => False,
+        pedantic => False,
+        lang => "raku",
+        version => "0.0.1",
+        protocol => 1,
+    );
+    
+    # Check if this is JWT auth and we need to handle nonce
+    if $!auth.^name eq "Nats::Auth::JWT" && (%!server-info<nonce>:exists) {
+        # For JWT auth with nonce, we need to add the signature
+        my $nonce = %!server-info<nonce>;
+        %connect-params = |%connect-params, |$!auth.with-signature($nonce);
+    } 
+    # Otherwise, just add the standard auth params
+    elsif $!auth {
+        %connect-params = |%connect-params, |$!auth.connect-params();
+    }
+    
+    self!print: "CONNECT", to-json(:!pretty, %connect-params);
 }
 
 method ping {

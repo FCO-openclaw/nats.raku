@@ -1,0 +1,41 @@
+name: test-with-nats
+on: [ push, pull_request ]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      nats:
+        image: nats:alpine
+        ports:
+          - 4222:4222
+          - 8222:8222
+        options: >-
+          --name nats-server
+          -e JS_ENABLED=true
+          -e JS_MAX_MEMORY_STORE=256MB
+          -e JS_MAX_FILE_STORE=1GB
+          --health-cmd "nats-server --print_config=check"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Verify NATS Server and JetStream
+        run: |
+          timeout 10 bash -c 'until nc -z localhost 4222; do sleep 1; done'
+          echo "NATS Server is running on port 4222"
+          curl -s http://localhost:8222/jsz | grep -q "streams" && echo "JetStream is enabled!"
+
+      - name: Test + coverage
+        uses: JJ/raku-test-action@v2
+        with:
+          coverage: true
+
+      - name: Run E2E Tests with NATS+JetStream
+        run: |
+          echo "Running NATS JetStream tests..."
+          export NATS_URL="nats://localhost:4222"
+          raku -I. test-pull.raku || echo "test-pull.raku failed"
+          raku -I. test-pull-continuous.raku || echo "test-pull-continuous.raku failed"
