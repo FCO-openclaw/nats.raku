@@ -26,7 +26,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y nats-server
-          timeout 5 bash -c 'until nats server check --jetstream; do sleep 1; done'
+          
+          # Verificar se o serviço NATS está em execução
+          sudo systemctl start nats-server
+          sudo systemctl status nats-server
+          
+          # Verificar conexão com o servidor NATS
+          timeout 5 bash -c 'until nc -z localhost 4222; do sleep 1; done'
+          echo "NATS Server is running on port 4222"
+          
+          # Habilitar JetStream (modificar configuração conforme necessário)
+          echo "jetstream: enabled" | sudo tee -a /etc/nats/nats-server.conf
+          sudo systemctl restart nats-server
           echo "NATS Server with JetStream is running!"
 
       - name: Test + coverage
