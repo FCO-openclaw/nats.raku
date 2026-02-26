@@ -42,9 +42,9 @@ class MockNats {
 my $mock-nats = MockNats.new;
 my $js = Nats::JetStream.new(nats => $mock-nats);
 
-# Test: Fetching messages (Pull Consumer returning a Nats::Subscription)
+# Test: Fetching messages (Pull Consumer returning a Nats::JetStream::Subscription)
 my $fetch-sub = $js.fetch("EVENTS", "WORKER_2", batch => 2);
-isa-ok $fetch-sub, Nats::Subscription, "fetch() returns a Nats::Subscription object";
+isa-ok $fetch-sub, Nats::JetStream::Subscription, "fetch() returns a Nats::JetStream::Subscription object";
 
 my $msg = await $fetch-sub.supply.Promise; # Await the first element of the supply
 

@@ -14,7 +14,10 @@ class MockNats {
     }
 }
 
+# A message class that implements the Ackable role
 class MockMessage does Nats::JetStream::Ackable {
+    has $.reply-to;
+    has $.nats;
 }
 
 my $mock-nats = MockNats.new;
