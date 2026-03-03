@@ -11,13 +11,13 @@ jobs:
           - 8222:8222
         options: >-
           --name nats-server
-          -e JS_ENABLED=true
-          -e JS_MAX_MEMORY_STORE=256MB
-          -e JS_MAX_FILE_STORE=1GB
           --health-cmd "nats-server --print_config=check"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+        env:
+          JS_ENABLED: true
+        command: ["--jetstream"]
 
     steps:
       - uses: actions/checkout@v3
@@ -46,6 +46,17 @@ jobs:
           git clone https://github.com/ugexe/zef.git
           cd zef
           raku -I. bin/zef install .
+          
+          # Adicionar zef ao PATH
+          echo "$HOME/.raku/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.raku/bin:$PATH"
+          
+          # Verificar instalação do zef
+          zef --version
+          
+      - name: Install Dependencies
+        run: |
+          export PATH="$HOME/.raku/bin:$PATH"
           
           # Instalar dependências
           zef install --/test Test::Mock
