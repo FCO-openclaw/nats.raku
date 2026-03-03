@@ -11,12 +11,14 @@ jobs:
           - 8222:8222
         options: >-
           --name nats-server
+          --entrypoint nats-server
           --health-cmd "nats-server --print_config=check"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
           --
           --jetstream
+          --http_port 8222
 
     steps:
       - uses: actions/checkout@v3
