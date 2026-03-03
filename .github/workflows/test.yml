@@ -12,10 +12,6 @@ jobs:
         options: >-
           --name nats-server
           --entrypoint nats-server
-          --health-cmd "nats-server --print_config=check"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
           --
           --jetstream
           --http_port 8222
