@@ -3,37 +3,20 @@ on: [ push, pull_request ]
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      nats:
-        image: nats:alpine
-        ports:
-          - 4222:4222
-          - 8222:8222
-        options: >-
-          --name nats-server
-          --entrypoint nats-server
-          --
-          --jetstream
-          --http_port 8222
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Verify NATS Server and JetStream
+      - name: Start NATS Server with JetStream
         run: |
-          # Verificar conexão com o servidor NATS
-          timeout 10 bash -c 'until nc -z localhost 4222; do sleep 1; done'
+          docker run -d --name nats-server -p 4222:4222 -p 8222:8222 nats:alpine --jetstream --http_port 8222
+          
+          # Aguardar o servidor iniciar
+          timeout 30 bash -c 'until nc -z localhost 4222; do sleep 1; done'
           echo "NATS Server is running on port 4222"
           
-          # Verificar se a porta de monitoramento está disponível
-          timeout 10 bash -c 'until nc -z localhost 8222; do sleep 1; done'
-          echo "NATS monitoring is available on port 8222"
-          
-          # Tentar acessar API JetStream (pode falhar se JetStream não estiver ativado)
-          curl -s http://localhost:8222/jsz || echo "JetStream monitoring API not available yet"
-          
-          # Como a imagem NATS Alpine tem JS_ENABLED=true, JetStream deve estar habilitado
-          echo "JetStream should be enabled!"
+          # Verificar JetStream
+          curl -s http://localhost:8222/jsz | head -5 || echo "JetStream check completed"
 
       - name: Setup Raku Environment
         run: |
