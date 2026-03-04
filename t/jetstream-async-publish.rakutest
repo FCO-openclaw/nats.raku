@@ -70,7 +70,7 @@ subtest "publish-async uses correct subject", {
     my $promise = $js.publish-async("orders.created", '{"id": 1}');
     await $promise;
     
-    is $mock-nats.last-subject, '$JS.ACK.ORDERS.123', "Uses $JS.ACK subject";
+    is $mock-nats.last-subject, '$JS.ACK.ORDERS.123', "Uses JS.ACK subject";
 };
 
 # Test 4: multiple async publishes
@@ -80,7 +80,7 @@ subtest "multiple async publishes", {
     
     my @promises;
     for 1..5 -> $i {
-        @promises.push: $js.publish-async("orders.created", "{\"id\": $i}");
+        @promises.push: $js.publish-async("orders.created", '{"id": ' ~ $i ~ '}');
     }
     
     my @pubacks = await Promise.allof(@promises);

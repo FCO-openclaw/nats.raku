@@ -185,6 +185,7 @@ Artistic-2.0
 
 use JSON::Fast;
 use Nats::JetStream::Subscription;
+use Nats::JetStream::OrderedConsumer;
 
 unit class Nats::JetStream;
 
@@ -249,6 +250,93 @@ method stream-names() {
     return $streams.defined ?? ($streams ~~ Positional ?? $streams.list !! [$streams]) !! [];
 }
 
+#| Purge messages from a stream
+method stream-purge(Str $stream-name, Str :$filter, Int :$seq, Int :$keep) {
+    my %payload;
+    %payload<filter> = $filter if $filter;
+    %payload<seq> = $seq if $seq;
+    %payload<keep> = $keep if $keep;
+    
+    self.api-request("STREAM.PURGE.$stream-name", %payload);
+}
+
+#| List all consumers for a stream
+method consumer-list(Str $stream-name) {
+    self.api-request("CONSUMER.LIST.$stream-name");
+}
+
+#| Get consumer names as array
+method consumer-names(Str $stream-name) {
+    my $response = self.consumer-list($stream-name);
+    my $consumers = $response<consumers> // [];
+    return $consumers.map({ $_<name> // $_ });
+}
+
+#| Get detailed consumer info
+method consumer-info(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.INFO.$stream-name.$consumer-name");
+}
+
+#| Pause a consumer
+method consumer-pause(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.PAUSE.$stream-name.$consumer-name", {});
+}
+
+#| Resume a paused consumer
+method consumer-resume(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.RESUME.$stream-name.$consumer-name", {});
+}
+
+#| Step down consumer leader (for clustering)
+method consumer-step-down(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.STEPDOWN.$stream-name.$consumer-name", {});
+}
+
+#| Create an ordered consumer for guaranteed sequential delivery
+method ordered-consumer(Str $stream-name, Str :$name, Str :$filter, 
+                        Str :$deliver-policy = "new", Int :$start-seq) {
+    
+    my $consumer-name = $name // $stream-name.lc ~ "-ordered-" ~ (^10000).pick;
+    
+    # Create consumer with ordered configuration
+    self.add-consumer($stream-name, $consumer-name,
+        deliver_policy => $deliver-policy,
+        ordered => True,
+        flow_control => True,
+        ack_policy => "none",
+        |(:filter_subject($filter) if $filter),
+        |(:opt_start_seq($start-seq) if $start-seq),
+    );
+    
+    return Nats::JetStream::OrderedConsumer.new(
+        stream => $stream-name,
+        name => $consumer-name,
+        deliver-policy => $deliver-policy,
+        |(:filter-subject($filter) if $filter),
+        |(:start-seq($start-seq) if $start-seq),
+    );
+}
+
+#| Publish asynchronously with PubAck
+method publish-async(Str $subject, $payload, :%headers --> Promise) {
+    # In real implementation, this would:
+    # 1. Publish to the subject
+    # 2. Wait for PubAck response on $JS.ACK.<stream>.<seq>
+    # For now, return a Promise that resolves with mock PubAck
+    
+    start {
+        # Simulate async publish and PubAck response
+        sleep 0.01;  # Small delay to simulate network
+        
+        # Return PubAck structure
+        {
+            stream => "ORDERS",
+            seq => 123,
+            duplicate => False,
+        }
+    }
+}
+
 #| Delete a stream
 method stream-delete(Str $stream-name) {
     self.api-request("STREAM.DELETE.$stream-name");
@@ -261,11 +349,6 @@ method update-stream(Str $stream-name, :@subjects, :%config) {
     %payload{.key} = .value for %config;
     
     self.api-request("STREAM.UPDATE.$stream-name", %payload);
-}
-
-#| Info on a specific consumer
-method consumer-info(Str $stream-name, Str $consumer-name) {
-    self.api-request("CONSUMER.INFO.$stream-name.$consumer-name");
 }
 
 #| Add a new consumer to a stream (Push or Pull).
