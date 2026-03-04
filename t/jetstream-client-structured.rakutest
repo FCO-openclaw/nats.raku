@@ -1,0 +1,78 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::JetStream;
+use Nats::JetStream::Client;
+use Nats::JetStream::Subscriptions;
+
+# Test 1: Basic js-subscriptions creation
+subtest "js-subscriptions creates JetStream subscriptions", {
+    my $js-subs = js-subscriptions {
+        consume "ORDERS", "processor", -> $msg {
+            say "Processing: ", $msg.payload;
+            $msg.ack;
+        }
+    };
+    
+    isa-ok $js-subs, Nats::JetStream::Subscriptions, "Returns correct type";
+    is $js-subs.subscriptions.elems, 1, "Has one subscription";
+    is $js-subs.subscriptions[0]<stream>, "ORDERS", "Stream name correct";
+    is $js-subs.subscriptions[0]<consumer>, "processor", "Consumer name correct";
+};
+
+# Test 2: Multiple consumers
+subtest "js-subscriptions with multiple consumers", {
+    my $js-subs = js-subscriptions {
+        consume "ORDERS", "new-orders", -> $msg {
+            $msg.ack;
+        }
+        
+        consume "EVENTS", "event-processor", -> $msg {
+            $msg.nak;
+        }
+        
+        consume "LOGS", "log-processor", -> $msg {
+            $msg.term;
+        }
+    };
+    
+    is $js-subs.subscriptions.elems, 3, "Has three subscriptions";
+};
+
+# Test 3: Consumer with filter subject
+subtest "consume with filter-subject", {
+    my $js-subs = js-subscriptions {
+        consume "ORDERS", "big-orders", -> $msg {
+            $msg.ack;
+        }, filter-subject => "orders.large.*"
+    };
+    
+    is $js-subs.subscriptions.elems, 1, "Has subscription with filter";
+    is $js-subs.subscriptions[0]<filter-subject>, "orders.large.*", "Filter subject correct";
+};
+
+# Test 4: Batch configuration
+subtest "consume with batch size", {
+    my $js-subs = js-subscriptions {
+        consume "ORDERS", "batch-processor", -> $msg {
+            $msg.ack;
+        }, batch => 100
+    };
+    
+    is $js-subs.subscriptions.elems, 1, "Has batch subscription";
+    is $js-subs.subscriptions[0]<batch>, 100, "Batch size correct";
+};
+
+# Test 5: Expires configuration
+subtest "consume with expires", {
+    my $js-subs = js-subscriptions {
+        consume "ORDERS", "processor", -> $msg {
+            $msg.ack;
+        }, expires => 5000
+    };
+    
+    is $js-subs.subscriptions[0]<expires>, 5000, "Expires correct";
+};
+
+done-testing;
