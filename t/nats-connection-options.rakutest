@@ -18,15 +18,13 @@ subtest "Nats.new accepts TLS options", {
     ok $nats.tls-verify, "TLS verify enabled";
 };
 
-# Test 2: Nats.new with JWT authentication
-subtest "Nats.new with JWT authentication", {
+# Test 2: Nats.new with JWT authentication path
+subtest "Nats.new with JWT path", {
     my $nats = Nats.new(
-        jwt-path => "/path/to/jwt.creds",
-        nkey-seed => "SUAM..."
+        jwt-path => "/path/to/jwt.creds"
     );
     
     is $nats.jwt-path, "/path/to/jwt.creds", "JWT path set";
-    is $nats.nkey-seed, "SUAM...", "NKey seed set";
 };
 
 # Test 3: Nats.new with credentials file
@@ -68,26 +66,33 @@ subtest "Nats.new with timeout options", {
     is $nats.max-pings-out, 2, "Max pings out set";
 };
 
-# Test 6: Token authentication
-subtest "Nats.new with token authentication", {
-    # Token is handled by auth object
+# Test 6: NKey seed option
+subtest "Nats.new with nkey seed", {
+    my $nats = Nats.new(
+        nkey-seed => "SUAM..."
+    );
+    
+    is $nats.nkey-seed, "SUAM...", "NKey seed set";
+};
+
+# Test 7: Token option
+subtest "Nats.new with token", {
     my $nats = Nats.new(
         token => "my-secret-token"
     );
     
-    # Token is processed by auth object
-    ok $nats.auth.defined, "Auth object created";
+    is $nats.token, "my-secret-token", "Token set";
 };
 
-# Test 7: Username/password authentication
-subtest "Nats.new with username/password", {
-    # Username/password are handled by auth object
+# Test 8: User/password options
+subtest "Nats.new with user/password", {
     my $nats = Nats.new(
-        username => "admin",
+        user => "admin",
         password => "secret"
     );
     
-    ok $nats.auth.defined, "Auth object created with credentials";
+    is $nats.user, "admin", "Username set";
+    is $nats.password, "secret", "Password set";
 };
 
 done-testing;
