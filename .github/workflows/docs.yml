@@ -1,0 +1,162 @@
+name: Generate Documentation and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main, master, feat/jetstream-support ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Raku
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rakudo
+          
+          # Install zef
+          git clone https://github.com/ugexe/zef.git /tmp/zef
+          cd /tmp/zef
+          raku -I. bin/zef install .
+          echo "$HOME/.raku/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          export PATH="$HOME/.raku/bin:$PATH"
+          zef install --/test Pod::To::Markdown
+
+      - name: Generate Markdown from POD6
+        run: |
+          export PATH="$HOME/.raku/bin:$PATH"
+          mkdir -p docs/api
+          
+          # Generate markdown for each .rakumod file
+          for file in lib/**/*.rakumod lib/*.rakumod; do
+            if [ -f "$file" ]; then
+              # Get module name from path
+              module_name=$(echo "$file" | sed 's|lib/||' | sed 's|/|::|g' | sed 's|.rakumod||')
+              output_file=$(echo "$file" | sed 's|lib/||' | sed 's|/|_|g' | sed 's|.rakumod|.md|')
+              
+              echo "Generating docs/api/$output_file from $file"
+              
+              # Convert POD to Markdown
+              raku -MPod::To::Markdown -e "
+                my \$pod = Pod::Load.load('$file');
+                print Pod::To::Markdown.render(\$pod);
+              " > "docs/api/$output_file" 2>/dev/null || echo "# $module_name\n\nFailed to generate documentation." > "docs/api/$output_file"
+            fi
+          done
+          
+          # Generate index
+          echo "# Nats.raku API Documentation" > docs/api/index.md
+          echo "" >> docs/api/index.md
+          echo "## Modules" >> docs/api/index.md
+          echo "" >> docs/api/index.md
+          
+          for file in docs/api/*.md; do
+            if [ "$(basename $file)" != "index.md" ]; then
+              name=$(basename $file .md | sed 's|_|::|g')
+              echo "- [$name]($(basename $file))" >> docs/api/index.md
+            fi
+          done
+
+      - name: Setup Python for MkDocs
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install MkDocs
+        run: |
+          pip install mkdocs mkdocs-material
+
+      - name: Create MkDocs site
+        run: |
+          # Create mkdocs.yml if it doesn't exist
+          if [ ! -f mkdocs.yml ]; then
+            cat > mkdocs.yml << 'EOF'
+site_name: Nats.raku Documentation
+site_description: Raku client for NATS.io messaging system
+site_author: Fernando Corrêa de Oliveira
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - API Reference:
+    - api/index.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+EOF
+          fi
+          
+          # Create docs directory structure
+          mkdir -p docs
+          
+          # Copy README as index
+          cp README.md docs/index.md 2>/dev/null || echo "# Nats.raku" > docs/index.md
+          
+          # Build site
+          mkdocs build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: ./site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-docs
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
