@@ -16,19 +16,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-        
       - name: Create simple docs
         run: |
           mkdir -p _site
-          echo "# Nats.raku Documentation" > _site/index.html
-          echo "<p>See <a href='https://github.com/FCO-openclaw/nats.raku#readme'>README</a> for now.</p>" >> _site/index.html
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><title>Nats.raku Documentation</title></head>
+          <body>
+            <h1>Nats.raku Documentation</h1>
+            <p>See <a href="https://github.com/FCO-openclaw/nats.raku#readme">README</a> for now.</p>
+          </body>
+          </html>
+          EOF
+          ls -la _site/
           
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: github-pages
           path: _site
+          retention-days: 1
 
   deploy:
     environment:
@@ -37,6 +45,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: docs
     steps:
-      - name: Deploy
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: _site
+          
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages
