@@ -7,14 +7,43 @@ Nats - A Raku client for NATS.io messaging system
 =head1 SYNOPSIS
 
 =begin code
+# Simple reactive style
 use Nats;
 
-# Basic connection
+given Nats.new {
+    react whenever .start {
+        whenever .subscribe("bla.ble.bli").supply {
+            say "Received: { .payload }";
+        }
+    }
+}
+=end code
+
+=begin code
+# Structured style with routing
+use Nats::Client;
+use Nats::Subscriptions;
+
+my $subscriptions = subscriptions {
+    subscribe -> "bla", $ble, "bli" {
+        say "ble: $ble";
+        say "payload: ", message.payload;
+        message.?reply-json: { :status<ok>, :$ble, :payload(message.payload) };
+    }
+}
+
+my $server = Nats::Client.new: :$subscriptions;
+$server.start;
+react whenever signal(SIGINT) { $server.stop; exit }
+=end code
+
+=begin code
+# Object-oriented style with JetStream
+use Nats;
+use Nats::JetStream;
+
 my $nats = Nats.new(servers => ["nats://localhost:4222"]);
 await $nats.start;
-
-# Publish messages
-$nats.publish("hello.world", "Hello from Raku!");
 
 # Subscribe to messages
 my $sub = $nats.subscribe("hello.>");
@@ -22,11 +51,13 @@ $sub.supply.tap(-> $msg {
     say "Received: $msg.payload() on $msg.subject()";
 });
 
-# Request/Reply pattern
-my $response = await $nats.request("service.status", "ping").head;
-say "Service response: $response.payload()";
+# Publish messages
+$nats.publish("hello.world", "Hello from Raku!");
 
-# JetStream support
+# Request/Reply
+my $response = await $nats.request("service.status", "ping").head;
+
+# JetStream
 my $js = Nats::JetStream.new(nats => $nats);
 $js.add-stream("ORDERS", subjects => ["orders.>"]);
 =end code
@@ -40,6 +71,68 @@ high-performance cloud native messaging system. This module provides:
 =item JetStream support for persistent messaging
 =item Authentication (Token, Username/Password, JWT/NKeys)
 =item Asynchronous messaging via Supplies
+=item Two usage styles: simple reactive or structured with routing
+
+=head1 USAGE STYLES
+
+=head2 Simple Reactive Style
+
+Use the C<Nats> class directly for a simple, reactive approach:
+
+=begin code
+use Nats;
+
+my $nats = Nats.new;
+react whenever $nats.start {
+    whenever $nats.subscribe("orders.>").supply -> $msg {
+        say "Received order: $msg.payload()";
+    }
+}
+=end code
+
+=head2 Structured Style with Nats::Client
+
+Use C<Nats::Client> and C<Nats::Subscriptions> for a more structured,
+route-based approach similar to web frameworks:
+
+=begin code
+use Nats::Client;
+use Nats::Subscriptions;
+
+my $subscriptions = subscriptions {
+    # Route: "users.<id>.orders"
+    subscribe -> "users", $user-id, "orders" {
+        say "User $user-id created an order";
+        say "Payload: ", message.payload;
+        
+        # Reply with JSON
+        message.?reply-json: {
+            :status<created>,
+            :user-id($user-id),
+            :order-id(12345)
+        };
+    }
+    
+    # Route with wildcards
+    subscribe -> "events", * {
+        say "Event received: ", message.payload;
+    }
+}
+
+my $server = Nats::Client.new: :$subscriptions;
+$server.start;
+
+# Graceful shutdown
+react whenever signal(SIGINT) {
+    $server.stop;
+    exit;
+}
+=end code
+
+B<Route Patterns:>
+=item Literal: C<"users"> matches exactly "users"
+=item Capture: C<$user-id> captures that position
+=item Wildcard: C<*> captures any single token
 
 =head1 ATTRIBUTES
 
