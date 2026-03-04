@@ -253,6 +253,46 @@ ENVIRONMENT
 
   * NATS_DEBUG - Enable debug output
 
+JETSTREAM STRUCTURED STYLE
+==========================
+
+For JetStream, you can also use the structured style similar to Nats::Client:
+
+    use Nats::JetStream::Client;
+    use Nats::JetStream::Subscriptions;
+
+    my $js-subs = js-subscriptions {
+        # Simple consumer
+        consume "ORDERS", "processor", -> $msg {
+            say "Processing order: ", $msg.payload;
+            $msg.ack;
+        }
+
+        # With filter subject
+        consume "ORDERS", "big-orders", -> $msg {
+            say "Processing big order: ", $msg.payload;
+            $msg.ack;
+        }, filter-subject => "orders.large.*"
+
+        # With batch size
+        consume "EVENTS", "batch-processor", -> $msg {
+            say "Processing event: ", $msg.payload;
+            $msg.ack;
+        }, batch => 100
+    }
+
+    my $client = Nats::JetStream::Client.new(
+        js => $js,
+        subscriptions => $js-subs
+    );
+
+    $client.start;
+
+    react whenever signal(SIGINT) {
+        $client.stop;
+        exit;
+    }
+
 SEE ALSO
 ========
 
