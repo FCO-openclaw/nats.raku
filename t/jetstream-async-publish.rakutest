@@ -13,14 +13,14 @@ my class MockMessage {
 }
 
 my class MockNats {
-    has $.last-subject;
-    has $.last-payload;
-    has $.last-headers;
+    has $.last-subject = '';
+    has $.last-payload = '';
+    has %.last-headers;
     
-    method request($subject, $payload, :%headers) {
+    method request($subject, $payload?, :%headers) {
         $!last-subject = $subject;
-        $!last-payload = $payload;
-        $!last-headers = %headers;
+        $!last-payload = $payload // '';
+        %!last-headers = %headers if %headers;
         
         # Return PubAck response
         return Supply.from-list([
@@ -34,7 +34,7 @@ my class MockNats {
     method publish($subject, $payload, :%headers) {
         $!last-subject = $subject;
         $!last-payload = $payload;
-        $!last-headers = %headers;
+        %!last-headers = %headers if %headers;
     }
 }
 

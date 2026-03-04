@@ -70,8 +70,8 @@ subtest "Publish with headers", {
     is $mock.last-headers<X-Key>, 'value', "Headers published";
 };
 
-# Test 6: Message headers iteration
-subtest "Message headers iteration", {
+# Test 6: Message headers count
+subtest "Message headers count", {
     my $msg = Nats::Message.new(
         subject => "test.subject",
         payload => "test payload",
@@ -79,12 +79,10 @@ subtest "Message headers iteration", {
         nats => MockNatsForMsg.new
     );
     
-    my $count = 0;
-    for $msg.headers.kv -> ($k, $v) {
-        $count++;
-    }
-    
-    is $count, 3, "All headers iterable";
+    is $msg.headers.elems, 3, "All headers present";
+    ok $msg.headers<A>, "Header A exists";
+    ok $msg.headers<B>, "Header B exists";
+    ok $msg.headers<C>, "Header C exists";
 };
 
 done-testing;
