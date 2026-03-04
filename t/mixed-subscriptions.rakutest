@@ -1,0 +1,141 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::Subscriptions;
+use Nats::Client;
+
+# Mock classes
+my class MockNats {
+    has @.subscriptions;
+    has $.last-subject;
+    has $.last-queue;
+    
+    method subscribe($subject, :$queue, :$max-messages) {
+        @.subscriptions.push: { :$subject, :$queue };
+        $!last-subject = $subject;
+        $!last-queue = $queue;
+        return {
+            sid => @.subscriptions.elems,
+            subject => $subject,
+            supply => Supply.from-list([])
+        }
+    }
+    
+    method request($subject, $payload) {
+        return Supply.from-list([{ payload => '{"success": true}' }]);
+    }
+    
+    method publish($subject, $payload, :$reply-to) {
+        $!last-subject = $subject;
+    }
+}
+
+# Test 1: Mixed NATS core and JetStream subscriptions
+subtest "js-subscribe creates JetStream consumer", {
+    my @captured-configs;
+    
+    my $subs = subscriptions {
+        # Regular NATS subscription
+        subscribe -> "events", $type {
+            say "Event: $type";
+        }
+        
+        # JetStream subscription using js-subscribe
+        js-subscribe -> $order-id {
+            @captured-configs.push: { order => $order-id };
+            message.ack;
+        }, :stream<ORDERS>, :consumer<processor>;
+        
+        # Another regular subscription
+        subscribe -> "notifications" {
+            say "Notification received";
+        }
+    };
+    
+    is $subs.subscriptions.elems, 3, "Has three subscriptions";
+    is $subs.subscriptions[1]<type>, 'jetstream', "Second is JetStream";
+    is $subs.subscriptions[1]<stream>, 'ORDERS', "Stream name correct";
+};
+
+# Test 2: js-subscribe with all options
+subtest "js-subscribe with all options", {
+    my $subs = subscriptions {
+        js-subscribe -> $id {
+            message.ack;
+        },
+        :stream<EVENTS>,
+        :consumer<handler>,
+        :filter<events.user.*>,
+        :batch(100),
+        :expires(5000),
+        :deliver-policy<all>,
+        :ack-policy<explicit>,
+        :max-deliver(3);
+    };
+    
+    is $subs.subscriptions.elems, 1, "Has one subscription";
+    my %config = $subs.subscriptions[0];
+    
+    is %config<type>, 'jetstream', "Type is jetstream";
+    is %config<stream>, 'EVENTS', "Stream correct";
+    is %config<consumer>, 'handler', "Consumer correct";
+    is %config<filter>, 'events.user.*', "Filter correct";
+    is %config<batch>, 100, "Batch correct";
+    is %config<expires>, 5000, "Expires correct";
+    is %config<deliver-policy>, 'all', "Deliver policy correct";
+    is %config<ack-policy>, 'explicit', "Ack policy correct";
+    is %config<max-deliver>, 3, "Max deliver correct";
+};
+
+# Test 3: js-subscribe auto-generates consumer name
+subtest "js-subscribe auto-generates consumer name", {
+    my $subs = subscriptions {
+        js-subscribe -> $id { message.ack; }, :stream<ORDERS>;
+    };
+    
+    my $consumer = $subs.subscriptions[0]<consumer>;
+    ok $consumer, "Consumer name generated: $consumer";
+    like $consumer, /orders\-consumer/, "Contains stream name";
+};
+
+# Test 4: Mixed complex example
+subtest "Complex mixed subscriptions", {
+    my $subs = subscriptions {
+        # NATS core - real-time notifications
+        subscribe -> "notifications", $type {
+            say "Real-time notification: $type";
+        }
+        
+        # JetStream - order processing
+        js-subscribe -> $order-id {
+            say "Processing order $order-id";
+            message.ack;
+        }, 
+        :stream<ORDERS>, 
+        :consumer<processor>,
+        :filter<orders.created.>;
+        
+        # NATS core - health checks (using signature for subject pattern)
+        subscribe -> "health" {
+            message.?reply: "OK";
+        }, :queue<workers>;
+        
+        # JetStream - event replay from beginning
+        js-subscribe -> $event {
+            say "Archiving: $event";
+            message.ack;
+        },
+        :stream<EVENTS>,
+        :consumer<archiver>,
+        :deliver-policy<all>,
+        :batch(50);
+    };
+    
+    is $subs.subscriptions.elems, 4, "Has four subscriptions";
+    is $subs.subscriptions[1]<type>, 'jetstream', "Order processor is JetStream";
+    is $subs.subscriptions[3]<type>, 'jetstream', "Archiver is JetStream";
+    is $subs.subscriptions[3]<deliver-policy>, 'all', "Archiver replays all";
+};
+
+done-testing;

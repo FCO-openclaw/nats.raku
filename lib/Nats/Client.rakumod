@@ -161,9 +161,69 @@ has       $.subscriptions is required;
 method start {
     await $!nats.start;
 
-    for $!subscriptions.subscriptions -> &route {
-        route $!nats
+    for $!subscriptions.subscriptions -> $sub {
+        given $sub {
+            # JetStream subscription (hash config)
+            when Hash {
+                self!start-jetstream-subscription($_);
+            }
+            # Regular NATS subscription (callable)
+            when Callable {
+                $sub($!nats);
+            }
+        }
     }
+}
+
+method !start-jetstream-subscription(%config) {
+    use Nats::JetStream;
+    
+    my $js = Nats::JetStream.new(nats => $!nats);
+    my $stream = %config<stream>;
+    my $consumer = %config<consumer>;
+    my $batch = %config<batch> // 1;
+    my &block = %config<block>;
+    
+    # Ensure stream exists
+    {
+        $js.stream-info($stream);
+        CATCH {
+            default {
+                # Create stream with default subjects
+                $js.add-stream($stream, subjects => [$stream ~ ".>"]);
+            }
+        }
+    }
+
+    # Ensure consumer exists
+    {
+        $js.consumer-info($stream, $consumer);
+        CATCH {
+            default {
+                my %consumer-config = (ack_policy => "explicit");
+                %consumer-config<filter_subject> = %config<filter> if %config<filter>;
+                $js.add-consumer($stream, $consumer, |%consumer-config);
+            }
+        }
+    }
+
+    # Start fetching
+    my $subscription = $js.fetch($stream, $consumer, :$batch);
+    $subscription.supply.tap(-> $msg {
+        my $*MESSAGE = $msg;
+        my $*JS-MESSAGES = [$msg];
+        {
+            # Extract subject parts and call block
+            my @parts = $msg.subject.split('.');
+            block(|@parts);
+            CATCH {
+                default {
+                    # Default error handling
+                    $msg.nak if $msg.^can('nak');
+                }
+            }
+        }
+    });
 }
 
 method stop {
