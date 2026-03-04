@@ -61,11 +61,12 @@ is Nats::Client.new(:subscriptions).servers, <nats://127.0.0.1:4222>, "default s
 my $nats-class = mocked Nats, overriding => {
     new => -> *%pars {
         is %pars<servers>, [ "nats://127.0.0.0.1:4333", ], "parses servers";
+        Nats.bless;
     }
 }
 
 subtest "Nats::Server create nats" => {
-    Nats::Client.new(:subscriptions, :nats-class($nats-class));
+    Nats::Client.new(:subscriptions, :nats-class($nats-class), servers => ["nats://127.0.0.0.1:4333"]);
 }
 
 done-testing

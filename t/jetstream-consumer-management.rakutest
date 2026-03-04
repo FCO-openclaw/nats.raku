@@ -1,0 +1,113 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::JetStream;
+
+my class MockMessage {
+    has $.payload;
+    method payload() { $!payload }
+}
+
+my class MockNats {
+    has $.last-subject;
+    has $.last-payload;
+    
+    method request($subject, $payload) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        
+        given $subject {
+            when /CONSUMER\.LIST/ {
+                return Supply.from-list([
+                    MockMessage.new(payload => '{"consumers": [{"name": "processor"}, {"name": "handler"}]}')
+                ]);
+            }
+            when /CONSUMER\.INFO/ {
+                return Supply.from-list([
+                    MockMessage.new(payload => '{"name": "processor", "stream": "ORDERS", "deliver_policy": "all"}')
+                ]);
+            }
+            when /CONSUMER\.PAUSE/ {
+                return Supply.from-list([
+                    MockMessage.new(payload => '{"paused": true}')
+                ]);
+            }
+            default {
+                return Supply.from-list([MockMessage.new(payload => '{"success": true}')]);
+            }
+        }
+    }
+}
+
+# Test 1: consumer-list returns list of consumers
+subtest "consumer-list() returns list of consumers", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.consumer-list("ORDERS");
+    
+    is $mock-nats.last-subject, '$JS.API.CONSUMER.LIST.ORDERS', "Correct API subject";
+    ok $result<consumers>, "Has consumers array";
+    is $result<consumers>.elems, 2, "Two consumers returned";
+};
+
+# Test 2: consumer-list returns consumer names
+subtest "consumer-names() returns array of names", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my @names = $js.consumer-names("ORDERS");
+    
+    is @names.elems, 2, "Two consumer names";
+    is @names[0], "processor", "First name correct";
+    is @names[1], "handler", "Second name correct";
+};
+
+# Test 3: consumer-info returns detailed info
+subtest "consumer-info() returns detailed consumer info", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $info = $js.consumer-info("ORDERS", "processor");
+    
+    is $mock-nats.last-subject, '$JS.API.CONSUMER.INFO.ORDERS.processor', "Correct API subject";
+    is $info<name>, "processor", "Consumer name correct";
+    is $info<stream>, "ORDERS", "Stream name correct";
+    is $info<deliver_policy>, "all", "Deliver policy correct";
+};
+
+# Test 4: consumer-pause pauses consumer
+subtest "consumer-pause() pauses consumer", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.consumer-pause("ORDERS", "processor");
+    
+    is $mock-nats.last-subject, '$JS.API.CONSUMER.PAUSE.ORDERS.processor', "Correct API subject";
+    ok $result<paused>, "Consumer paused";
+};
+
+# Test 5: consumer-resume resumes paused consumer
+subtest "consumer-resume() resumes consumer", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.consumer-resume("ORDERS", "processor");
+    
+    is $mock-nats.last-subject, '$JS.API.CONSUMER.RESUME.ORDERS.processor', "Correct API subject";
+    ok $result<resumed>, "Consumer resumed";
+};
+
+# Test 6: consumer-step-down for leader election
+subtest "consumer-step-down() triggers leader step down", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.consumer-step-down("ORDERS", "processor");
+    
+    is $mock-nats.last-subject, '$JS.API.CONSUMER.STEPDOWN.ORDERS.processor', "Correct API subject";
+    ok $result<success>, "Step down successful";
+};
+
+done-testing;

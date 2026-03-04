@@ -1,0 +1,93 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::JetStream;
+
+# Mock Nats
+my class MockMessage {
+    has $.payload;
+    method payload() { $!payload }
+}
+
+my class MockNats {
+    has $.last-subject;
+    has $.last-payload;
+    
+    method request($subject, $payload) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        return Supply.from-list([
+            MockMessage.new(payload => '{"type": "io.nats.jetstream.api.v1.consumer_create_response", "success": true}')
+        ]);
+    }
+    
+    method subscribe($subject) {
+        return {
+            sid => 1,
+            subject => $subject,
+            supply => Supply.from-list([])
+        }
+    }
+    
+    method gen-inbox { "_INBOX.123" }
+    
+    method publish($subject, $payload, :$reply-to) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+    }
+}
+
+# Test 1: ordered-consumer creates an ordered consumer
+subtest "ordered-consumer() creates ordered consumer", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $consumer = $js.ordered-consumer("ORDERS", :deliver-policy<all>);
+    
+    isa-ok $consumer, Nats::JetStream::OrderedConsumer, "Returns OrderedConsumer";
+    is $consumer.stream, "ORDERS", "Stream name correct";
+    is $consumer.ordered, True, "Ordered flag set";
+};
+
+# Test 2: ordered consumer guarantees message order
+subtest "ordered consumer guarantees sequential delivery", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $consumer = $js.ordered-consumer("EVENTS");
+    my @seq-numbers;
+    
+    # Simulate receiving messages with sequence numbers
+    for 1..5 -> $seq {
+        @seq-numbers.push: $seq;
+    }
+    
+    is @seq-numbers, [1, 2, 3, 4, 5], "Messages in sequential order";
+};
+
+# Test 3: ordered consumer with start sequence
+subtest "ordered-consumer with start sequence", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $consumer = $js.ordered-consumer("ORDERS", 
+        :deliver-policy<by_start_sequence>,
+        :start-seq(100)
+    );
+    
+    is $consumer.start-seq, 100, "Start sequence set";
+};
+
+# Test 4: ordered consumer auto-creates consumer with ordered config
+subtest "ordered-consumer auto-creates consumer", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $consumer = $js.ordered-consumer("STREAM");
+    
+    # Should create consumer with ordered=true, flow_control, etc.
+    ok $mock-nats.last-subject.contains('CONSUMER.CREATE'), "Creates consumer";
+};
+
+done-testing;

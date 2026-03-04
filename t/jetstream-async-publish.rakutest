@@ -1,0 +1,103 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::JetStream;
+
+# Mock Nats
+my class MockMessage {
+    has $.payload;
+    has $.subject;
+    method payload() { $!payload }
+    method subject() { $!subject }
+}
+
+my class MockNats {
+    has $.last-subject;
+    has $.last-payload;
+    has $.last-headers;
+    
+    method request($subject, $payload, :%headers) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        $!last-headers = %headers;
+        
+        # Return PubAck response
+        return Supply.from-list([
+            MockMessage.new(
+                subject => $subject,
+                payload => '{"stream": "ORDERS", "seq": 123}'
+            )
+        ]);
+    }
+    
+    method publish($subject, $payload, :%headers) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        $!last-headers = %headers;
+    }
+}
+
+# Test 1: publish-async returns a Promise
+subtest "publish-async returns a Promise", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $promise = $js.publish-async("orders.created", '{"id": 1}');
+    
+    isa-ok $promise, Promise, "Returns a Promise";
+};
+
+# Test 2: publish-async resolves with PubAck
+subtest "publish-async resolves with PubAck", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $promise = $js.publish-async("orders.created", '{"id": 1}');
+    my $puback = await $promise;
+    
+    ok $puback<stream>, "PubAck has stream";
+    ok $puback<seq>, "PubAck has sequence";
+    is $puback<stream>, "ORDERS", "Stream name correct";
+    is $puback<seq>, 123, "Sequence number correct";
+};
+
+# Test 3: publish-async sends to $JS.ACK subject
+subtest "publish-async uses correct subject", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $promise = $js.publish-async("orders.created", '{"id": 1}');
+    await $promise;
+    
+    is $mock-nats.last-subject, '$JS.ACK.ORDERS.123', "Uses JS.ACK subject";
+};
+
+# Test 4: multiple async publishes
+subtest "multiple async publishes", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my @promises;
+    for 1..5 -> $i {
+        @promises.push: $js.publish-async("orders.created", '{"id": ' ~ $i ~ '}');
+    }
+    
+    my @pubacks = await Promise.allof(@promises);
+    is @pubacks.elems, 5, "All 5 publishes completed";
+};
+
+# Test 5: publish-async with headers
+subtest "publish-async with message headers", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $promise = $js.publish-async("orders.created", '{"id": 1}', 
+        headers => { 'Nats-Msg-Id' => 'uuid-123' }
+    );
+    await $promise;
+    
+    is $mock-nats.last-headers<Nats-Msg-Id>, 'uuid-123', "Headers sent";
+};
+
+done-testing;

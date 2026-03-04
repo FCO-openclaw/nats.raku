@@ -1,0 +1,49 @@
+use Test;
+use Nats::JetStream::Ackable;
+
+plan 10;
+
+class MockNats {
+    has %!published;
+    method publish($subject, $payload) {
+        %!published{$subject} = $payload;
+        True; # Returning True to simulate success
+    }
+    method last-publish {
+        %!published
+    }
+}
+
+# A message class that implements the Ackable role
+# Note: The role already defines $.reply-to and $.nats attributes
+class MockMessage does Nats::JetStream::Ackable {}
+
+my $mock-nats = MockNats.new;
+my $msg = MockMessage.new(reply-to => 'INBOX.123', nats => $mock-nats);
+
+ok $msg.defined, "Message instantiation with role works";
+is $msg.reply-to, 'INBOX.123', "reply-to attribute set properly";
+
+# Test standard ACK
+ok $msg.ack, "ack() returns True";
+is $mock-nats.last-publish{'INBOX.123'}, "+ACK", "ACK payload was correctly published to the reply-to subject";
+
+# Test Negative ACK
+$msg.nak;
+is $mock-nats.last-publish{'INBOX.123'}, "-NAK", "NAK payload was correctly published";
+
+# Test TERM (Terminal)
+$msg.term;
+is $mock-nats.last-publish{'INBOX.123'}, "+TERM", "TERM payload was correctly published";
+
+# Test WPI (Work in Progress indicator)
+$msg.wpi;
+is $mock-nats.last-publish{'INBOX.123'}, "+WPI", "WPI payload was correctly published";
+
+# Test failure modes (no reply-to)
+my $msg-no-reply = MockMessage.new(nats => $mock-nats);
+throws-like { $msg-no-reply.ack }, Exception, "ack() throws if there is no reply-to attribute";
+throws-like { $msg-no-reply.term }, Exception, "term() throws if there is no reply-to attribute";
+throws-like { $msg-no-reply.wpi }, Exception, "wpi() throws if there is no reply-to attribute";
+
+done-testing;

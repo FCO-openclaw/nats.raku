@@ -1,0 +1,99 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::JetStream;
+
+# Mock Nats for testing
+my class MockMessage {
+    has $.payload;
+    method payload() { $!payload }
+}
+
+my class MockNats {
+    has $.last-subject;
+    has $.last-payload;
+    has $.last-reply-to;
+    
+    method request($subject, $payload, :$reply-to) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        $!last-reply-to = $reply-to;
+        
+        # Return a mocked response Supply with MockMessage objects
+        return Supply.from-list([
+            MockMessage.new(payload => '{"success": true, "streams": ["TEST_STREAM_1", "TEST_STREAM_2"]}')
+        ]);
+    }
+    
+    method publish($subject, $payload, :$reply-to) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        $!last-reply-to = $reply-to;
+    }
+}
+
+# Tests for stream-list
+subtest "stream-list() returns list of stream names", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-list();
+    
+    is $mock-nats.last-subject, '$JS.API.STREAM.LIST', 'Correct API subject used';
+    is $result<success>, True, 'Returns success';
+    ok $result<streams>, 'Has streams array';
+    is $result<streams>.elems, 2, 'Two streams returned';
+};
+
+# Tests for stream-delete
+subtest "stream-delete() removes a stream", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-delete("TEST_STREAM");
+    
+    is $mock-nats.last-subject, '$JS.API.STREAM.DELETE.TEST_STREAM', 'Correct API subject used';
+    is $result<success>, True, 'Returns success';
+};
+
+# Test error handling for stream-delete with non-existent stream
+subtest "stream-delete() fails for non-existent stream", {
+    my class FailingMockNats {
+        method request($subject, $payload, :$reply-to) {
+            return Supply.from-list([
+                MockMessage.new(payload => '{"error": {"code": 404, "description": "stream not found"}}')
+            ]);
+        }
+        method publish($subject, $payload, :$reply-to) { }
+    }
+    
+    my $mock-nats = FailingMockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    throws-like { $js.stream-delete("NON_EXISTENT") }, Exception, 
+        message => /"stream not found"/, 
+        'Throws exception for non-existent stream';
+};
+
+# Test stream-names (convenience method)
+subtest "stream-names() returns array of names", {
+    my class NamesMockNats {
+        method request($subject, $payload, :$reply-to) {
+            return Supply.from-list([
+                MockMessage.new(payload => '{"type": "io.nats.jetstream.api.v1.stream_names_response", "streams": ["ORDERS", "EVENTS"]}')
+            ]);
+        }
+        method publish($subject, $payload, :$reply-to) { }
+    }
+    
+    my $mock-nats = NamesMockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    my @names = $js.stream-names();
+    
+    is @names.elems, 2, 'Returns two stream names';
+    is @names[0], 'ORDERS', 'First stream name correct';
+    is @names[1], 'EVENTS', 'Second stream name correct';
+};
+
+done-testing;

@@ -1,0 +1,128 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats;
+use Nats::Message;
+
+# Test 1: Message has headers accessor
+subtest "Message has headers accessor", {
+    my class MockPayload {
+        method decode { "test data" }
+    }
+    
+    my $msg = Nats::Message.new(
+        subject => "test.subject",
+        payload => MockPayload.new,
+        headers => { 'X-Custom' => 'value', 'X-Trace' => '123' }
+    );
+    
+    ok $msg.headers, "Has headers";
+    is $msg.headers<X-Custom>, 'value', "Custom header accessible";
+    is $msg.headers<X-Trace>, '123', "Trace header accessible";
+};
+
+# Test 2: Message headers get method
+subtest "Message headers get method", {
+    my class MockPayload {
+        method decode { "test data" }
+    }
+    
+    my $msg = Nats::Message.new(
+        subject => "test.subject",
+        payload => MockPayload.new,
+        headers => { 'Nats-Msg-Id' => 'uuid-456' }
+    );
+    
+    is $msg.headers.get('Nats-Msg-Id'), 'uuid-456', "get() method works";
+};
+
+# Test 3: Message headers set method
+subtest "Message headers can be modified", {
+    my class MockPayload {
+        method decode { "test data" }
+    }
+    
+    my $msg = Nats::Message.new(
+        subject => "test.subject",
+        payload => MockPayload.new,
+        headers => {}
+    );
+    
+    $msg.headers.set('X-Processed', 'true');
+    is $msg.headers<X-Processed>, 'true', "Header set successfully";
+};
+
+# Test 4: Nats.drain for graceful shutdown
+subtest "Nats.drain for graceful shutdown", {
+    my class MockNatsConnection {
+        has $.drained = False;
+        method drain { $!drained = True; }
+    }
+    
+    my $nats = Nats.new;
+    # Simulate connection
+    
+    lives-ok { $nats.drain }, "drain() executes without error";
+};
+
+# Test 5: Drain completes in-progress messages
+subtest "Drain completes in-progress messages", {
+    my class MockNatsConnection {
+        has @.messages;
+        method drain {
+            # Process remaining messages
+            for @.messages -> $msg {
+                $msg.process if $msg.can('process');
+            }
+        }
+    }
+    
+    my $nats = Nats.new;
+    lives-ok { $nats.drain }, "Drain completes messages";
+};
+
+# Test 6: Drain timeout
+subtest "Drain with timeout", {
+    my $nats = Nats.new;
+    
+    # Drain with 5 second timeout
+    lives-ok { $nats.drain(:timeout(5)) }, "Drain with timeout works";
+};
+
+# Test 7: Headers in publish
+subtest "Publish with headers", {
+    my class MockNats {
+        has %.last-headers;
+        method publish($subject, $payload, :%headers) {
+            %!last-headers = %headers;
+        }
+    }
+    
+    my $mock = MockNats.new;
+    $mock.publish("test", "data", headers => { 'X-Key' => 'value' });
+    
+    is $mock.last-headers<X-Key>, 'value', "Headers published";
+};
+
+# Test 8: Message headers iteration
+subtest "Message headers iteration", {
+    my class MockPayload {
+        method decode { "test data" }
+    }
+    
+    my $msg = Nats::Message.new(
+        subject => "test.subject",
+        payload => MockPayload.new,
+        headers => { 'A' => '1', 'B' => '2', 'C' => '3' }
+    );
+    
+    my $count = 0;
+    for $msg.headers.kv -> ($k, $v) {
+        $count++;
+    }
+    
+    is $count, 3, "All headers iterable";
+};
+
+done-testing;

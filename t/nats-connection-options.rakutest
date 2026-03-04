@@ -1,0 +1,98 @@
+use v6;
+use Test;
+
+use Nats;
+
+# Test 1: Nats.new with TLS options
+subtest "Nats.new accepts TLS options", {
+    my $nats = Nats.new(
+        servers => ["tls://nats.example.com:4222"],
+        tls-ca-file => "/path/to/ca.crt",
+        tls-cert-file => "/path/to/client.crt",
+        tls-key-file => "/path/to/client.key",
+        tls-verify => True
+    );
+    
+    is $nats.tls-ca-file, "/path/to/ca.crt", "TLS CA file set";
+    is $nats.tls-cert-file, "/path/to/client.crt", "TLS cert file set";
+    is $nats.tls-key-file, "/path/to/client.key", "TLS key file set";
+    ok $nats.tls-verify, "TLS verify enabled";
+};
+
+# Test 2: Nats.new with JWT authentication
+subtest "Nats.new with JWT authentication", {
+    my $nats = Nats.new(
+        servers => ["nats://localhost:4222"],
+        jwt => "eyJhbGciOiJIUzI1NiIs...",
+        nkey-seed => "SUAM..."
+    );
+    
+    is $nats.jwt, "eyJhbGciOiJIUzI1NiIs...", "JWT set";
+    is $nats.nkey-seed, "SUAM...", "NKey seed set";
+};
+
+# Test 3: Nats.new with credentials file
+subtest "Nats.new with credentials file", {
+    my $nats = Nats.new(
+        servers => ["nats://localhost:4222"],
+        creds-file => "/path/to/mycreds.creds"
+    );
+    
+    is $nats.creds-file, "/path/to/mycreds.creds", "Creds file set";
+};
+
+# Test 4: Reconnection options
+subtest "Nats.new with reconnection options", {
+    my $nats = Nats.new(
+        servers => ["nats://localhost:4222"],
+        reconnect => True,
+        max-reconnect => 10,
+        reconnect-delay => 1.0,
+        reconnect-delay-max => 60.0,
+        reconnect-jitter => 0.5
+    );
+    
+    ok $nats.reconnect, "Reconnection enabled";
+    is $nats.max-reconnect, 10, "Max reconnect set";
+    is $nats.reconnect-delay, 1.0, "Reconnect delay set";
+    is $nats.reconnect-delay-max, 60.0, "Max reconnect delay set";
+    is $nats.reconnect-jitter, 0.5, "Reconnect jitter set";
+};
+
+# Test 5: Connection timeout options
+subtest "Nats.new with timeout options", {
+    my $nats = Nats.new(
+        servers => ["nats://localhost:4222"],
+        connect-timeout => 5.0,
+        ping-interval => 30,
+        max-pings-out => 2
+    );
+    
+    is $nats.connect-timeout, 5.0, "Connect timeout set";
+    is $nats.ping-interval, 30, "Ping interval set";
+    is $nats.max-pings-out, 2, "Max pings out set";
+};
+
+# Test 6: Token authentication
+subtest "Nats.new with token authentication", {
+    my $nats = Nats.new(
+        servers => ["nats://localhost:4222"],
+        token => "my-secret-token"
+    );
+    
+    is $nats.token, "my-secret-token", "Token set";
+};
+
+# Test 7: Username/password authentication
+subtest "Nats.new with username/password", {
+    my $nats = Nats.new(
+        servers => ["nats://localhost:4222"],
+        user => "admin",
+        password => "secret"
+    );
+    
+    is $nats.user, "admin", "Username set";
+    is $nats.password, "secret", "Password set";
+};
+
+done-testing;

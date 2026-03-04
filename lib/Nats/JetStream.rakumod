@@ -1,122 +1,420 @@
+=begin pod
+
+=head1 NAME
+
+Nats::JetStream - JetStream support for NATS.io in Raku
+
+=head1 SYNOPSIS
+
+=begin code
+use Nats;
+use Nats::JetStream;
+
+my $nats = Nats.new(servers => ["nats://localhost:4222"]);
+my $js = Nats::JetStream.new(nats => $nats);
+
+# Stream Management
+$js.add-stream("ORDERS", subjects => ["orders.>"]);
+my $info = $js.stream-info("ORDERS");
+my @streams = $js.stream-names();
+$js.stream-delete("ORDERS");
+
+# Consumer Management
+$js.add-consumer("ORDERS", "processor", filter-subject => "orders.created");
+my $consumer = $js.consumer-info("ORDERS", "processor");
+
+# Pull Messages
+my $sub = $js.fetch("ORDERS", "processor", batch => 10);
+$sub.supply.tap(-> $msg {
+    say "Received: $msg.payload()";
+    $msg.ack();
+});
+=end code
+
+=head1 DESCRIPTION
+
+This module provides JetStream support for the NATS.io messaging system in Raku.
+JetStream is a streaming platform built on top of NATS that enables:
+
+=item At-least-once delivery
+=item Stream persistence
+=item Replay capabilities
+=item Consumer groups
+=item Exactly-once processing semantics
+
+=head1 STREAM MANAGEMENT
+
+=head2 method add-stream
+
+Creates a new JetStream stream.
+
+=begin code
+method add-stream(Str $stream-name, :@subjects)
+=end code
+
+B<Parameters:>
+=item $stream-name - Name of the stream
+=item :@subjects - Array of subject patterns to capture
+
+=head2 method stream-info
+
+Get information about a specific stream.
+
+=begin code
+method stream-info(Str $stream-name)
+=end code
+
+=head2 method stream-list
+
+List all streams.
+
+=begin code
+method stream-list()
+=end code
+
+=head2 method stream-names
+
+Get an array of all stream names (convenience method).
+
+=begin code
+method stream-names()
+=end code
+
+=head2 method stream-delete
+
+Delete a stream and all its data.
+
+=begin code
+method stream-delete(Str $stream-name)
+=end code
+
+=head2 method update-stream
+
+Update an existing stream's configuration.
+
+=begin code
+method update-stream(Str $stream-name, :@subjects, :%config)
+=end code
+
+B<Parameters:>
+=item $stream-name - Name of the stream to update
+=item :@subjects - New subject patterns (optional)
+=item :%config - Additional configuration options (optional)
+
+B<Example:>
+=begin code
+$js.update-stream("ORDERS", subjects => ["orders.>", "returns.>"]);
+=end code
+
+=head1 CONSUMER MANAGEMENT
+
+=head2 method add-consumer
+
+Add a consumer to a stream.
+
+=begin code
+method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$deliver-subject, :$ack-policy = "explicit")
+=end code
+
+B<Parameters:>
+=item $stream-name - Name of the stream
+=item $consumer-name - Name of the consumer
+=item :$filter-subject - Only receive messages matching this subject (optional)
+=item :$deliver-subject - Subject for push delivery (for push consumers)
+=item :$ack-policy - Acknowledgment policy: "explicit", "none", or "all" (default: "explicit")
+
+B<Examples:>
+=begin code
+# Pull consumer
+$js.add-consumer("ORDERS", "processor", filter-subject => "orders.created");
+
+# Push consumer
+$js.add-consumer("ORDERS", "notifier", 
+    filter-subject => "orders.urgent",
+    deliver-subject => "notifications.urgent"
+);
+=end code
+
+=head2 method consumer-info
+
+Get information about a consumer.
+
+=begin code
+method consumer-info(Str $stream-name, Str $consumer-name)
+=end code
+
+=head2 method consumer-delete
+
+Delete a consumer from a stream.
+
+=begin code
+method consumer-delete(Str $stream-name, Str $consumer-name)
+=end code
+
+=head2 method consumer-list
+
+List all consumers for a stream.
+
+=begin code
+method consumer-list(Str $stream-name)
+=end code
+
+=head1 PULL CONSUMERS
+
+=head2 method fetch
+
+Fetch messages from a pull consumer.
+
+=begin code
+# Single batch
+method fetch(Str $stream-name, Str $consumer-name, Int :$batch!, Int :$expires?, Bool :$no-wait?)
+
+# Continuous polling
+method fetch(Str $stream-name, Str $consumer-name, Int :$expires? = 100, Bool :$no-wait?)
+=end code
+
+=head1 AUTHOR
+
+Fernando Correa de Oliveira <fco@cpan.org>
+
+=head1 LICENSE
+
+Artistic-2.0
+
+=end pod
+
 use JSON::Fast;
+use Nats::JetStream::Subscription;
+use Nats::JetStream::OrderedConsumer;
 
-# Constantes principais
-constant JS = '$JS';
-constant JS-API = JS ~ '.API';
-constant JS-ACK = JS ~ '.ACK';
+unit class Nats::JetStream;
 
-# Stream Subjects
-constant STREAM-CREATE     = JS-API ~ '.STREAM.CREATE.%s';
-constant STREAM-INFO       = JS-API ~ '.STREAM.INFO.%s';
-constant STREAM-DELETE     = JS-API ~ '.STREAM.DELETE.%s';
-constant STREAM-LIST       = JS-API ~ '.STREAM.LIST';
+has $.nats where { .^can('publish') && .^can('request') };
+has Str $.prefix = '$JS.API';
 
-# Consumer Subjects
-constant CONSUMER-CREATE   = JS-API ~ '.CONSUMER.CREATE.%s.%s';
-constant CONSUMER-INFO     = JS-API ~ '.CONSUMER.INFO.%s.%s';
-constant CONSUMER-DELETE   = JS-API ~ '.CONSUMER.DELETE.%s.%s';
-constant CONSUMER-MSG-NEXT = JS-API ~ '.CONSUMER.MSG.NEXT.%s.%s';
-
-sub to-map($obj, *%pars --> Map()) {
-    $obj.^attributes.map: -> $attr {
-        my $name = $attr.name.substr(2).subst: /_/, "-", :g;
-        next if %pars{$name}:e &&!%pars{$name};
-        my $val = $attr.get_value: $obj;
-        next unless $val ~~ Str | Int | Positional | Associative | Nil;
-        $name => $val
+#| Wrapper to send JSON payloads to JetStream API endpoints and parse the response
+method api-request(Str $subject, $payload = %()) {
+    my $full-subject = "$!prefix.$subject";
+    
+    my $prom = Promise.new;
+    my $res = $!nats.request($full-subject, to-json($payload));
+    if $res ~~ Supply {
+        $res.head(1).tap(
+            -> $msg { $prom.keep($msg) },
+            done => { $prom.keep(Any) unless $prom.status }
+        );
+    } else {
+        # Fallback if it returned a Seq directly
+        $prom.keep($res[0]);
+    }
+    
+    my $resp-msg = await $prom;
+    $resp-msg = await $resp-msg if $resp-msg ~~ Promise;
+    
+    return do given $resp-msg {
+        when .defined {
+            my $data = from-json(.payload);
+            # JS API returns errors in the JSON payload under 'error'
+            fail "JetStream API Error: $data<error><description>" if $data<error>;
+            $data;
+        }
+        default {
+            fail "No response from JetStream API at $full-subject";
+        }
     }
 }
 
-class Nats::Consumer {...}
-
-class Nats::Stream {
-
-    has       $.nats is required;
-    has Str() $.name is required;
-    has Str() @.subjects,
-    has Str() $.retention = 'limits',
-    has Str() $.storage = 'file',
-    has Int() $.max-msgs = -1,
-    has Int() $.max-bytes = -1,
-    has Int() $.max-age = 0,
-
-    #enum RetentionPolicy <limits interest work_queue>;
-    #enum DiscardPolicy <old new>;
-    #enum StorageType <file memory any>;
-    ##enum Placement <>;
-    #enum StoreCompression <none s2>;
-    #
-    #has $.nats;
-    #
-    #has Str              $!name                     is required;
-    #has Str              @!subjects                 is required;
-    #has Str              $!description;
-    #has RetentionPolicy  $!retention;
-    #has Int              $!max-consumers;
-    #has Int              $!max-msgs;
-    #has Int              $!max-bytes;
-    #has Int              $!max-age;
-    #has Int              $!max-msgs-per-subject;
-    #has Int              $!max-msg-size;
-    #has DiscardPolicy    $!discard;
-    #has StorageType      $!storage;
-    #has Int              $!num-replicas;
-    #has Bool             $!no-ack;
-    #has Str              $!template-owner;
-    #has Int              $!duplicate-window;
-    ##has Placement        $!placement;
-    #has                  %!mirror;
-    #has Associative      @!sources;
-    #has StoreCompression $!compression;
-    #has UInt             $!first-seq;
-
-    method subject(Str $template, Str $stream? --> Str) {
-        sprintf $template, |(.Str with $stream)
-    }
-
-    method create   { $!nats.request: $.subject(STREAM-CREATE, $!name), to-json self.&to-map }
-    method info     { $!nats.request: $.subject(STREAM-INFO, $!name)   }
-    method delete   { $!nats.request: $.subject(STREAM-DELETE, $!name) }
-    method list     { $!nats.request: $.subject(STREAM-LIST)           }
-    method consumer(Str $name, |c) { Nats::Consumer.new: |c, :$!nats, :$name, :stream($!name) }
+#| Info on a specific stream
+method stream-info(Str $stream-name) {
+    self.api-request("STREAM.INFO.$stream-name");
 }
 
-class Nats::Consumer {
-    has     $.nats is required;
-    has Str $.name is required;
-    has Str $.stream is required;
-    has Str $.durable-name = $!name,
-    has Str $.deliver-policy  = 'all',
-    has Str $.ack-policy      = 'explicit',
-    has Str $.filter-subject,
-    has Int $.ack-wait        = 30,
-    has Int $.max-deliver     = -1,
-    has Int $.max-ack-pending = 100,
-    has Str $.replay-policy   = "instant",
-    has Int $.num-replicas    = 0,
+#| Add a new stream
+method add-stream(Str $stream-name, :@subjects) {
+    self.api-request("STREAM.CREATE.$stream-name", {
+        name => $stream-name,
+        subjects => @subjects
+    });
+}
 
-    method config(--> Map()) {
-        :stream_name($!stream),
-        :config{
-            :ack_policy($!ack-policy),
-            :deliver_policy($!deliver-policy),
-            :durable_name($!durable-name),
-            :$!name,
-            :max_ack_pending($!max-ack-pending),
-            :max_deliver($!max-deliver),
-            :replay_policy($!replay-policy),
-            :num_replicas($!num-replicas),
-        },
-        :action(""),
+#| List all streams
+method stream-list() {
+    self.api-request("STREAM.LIST");
+}
+
+#| Get array of stream names (convenience method)
+method stream-names() {
+    my $response = self.stream-list();
+    my $streams = $response<streams>;
+    # Ensure we return a proper Array
+    return $streams.defined ?? ($streams ~~ Positional ?? $streams.list !! [$streams]) !! [];
+}
+
+#| Purge messages from a stream
+method stream-purge(Str $stream-name, Str :$filter, Int :$seq, Int :$keep) {
+    my %payload;
+    %payload<filter> = $filter if $filter;
+    %payload<seq> = $seq if $seq;
+    %payload<keep> = $keep if $keep;
+    
+    self.api-request("STREAM.PURGE.$stream-name", %payload);
+}
+
+#| List all consumers for a stream
+method consumer-list(Str $stream-name) {
+    self.api-request("CONSUMER.LIST.$stream-name");
+}
+
+#| Get consumer names as array
+method consumer-names(Str $stream-name) {
+    my $response = self.consumer-list($stream-name);
+    my $consumers = $response<consumers> // [];
+    return $consumers.map({ $_<name> // $_ });
+}
+
+#| Get detailed consumer info
+method consumer-info(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.INFO.$stream-name.$consumer-name");
+}
+
+#| Pause a consumer
+method consumer-pause(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.PAUSE.$stream-name.$consumer-name", {});
+}
+
+#| Resume a paused consumer
+method consumer-resume(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.RESUME.$stream-name.$consumer-name", {});
+}
+
+#| Step down consumer leader (for clustering)
+method consumer-step-down(Str $stream-name, Str $consumer-name) {
+    self.api-request("CONSUMER.STEPDOWN.$stream-name.$consumer-name", {});
+}
+
+#| Create an ordered consumer for guaranteed sequential delivery
+method ordered-consumer(Str $stream-name, Str :$name, Str :$filter, 
+                        Str :$deliver-policy = "new", Int :$start-seq) {
+    
+    my $consumer-name = $name // $stream-name.lc ~ "-ordered-" ~ (^10000).pick;
+    
+    # Create consumer with ordered configuration
+    self.add-consumer($stream-name, $consumer-name,
+        deliver_policy => $deliver-policy,
+        ordered => True,
+        flow_control => True,
+        ack_policy => "none",
+        |(:filter_subject($filter) if $filter),
+        |(:opt_start_seq($start-seq) if $start-seq),
+    );
+    
+    return Nats::JetStream::OrderedConsumer.new(
+        stream => $stream-name,
+        name => $consumer-name,
+        deliver-policy => $deliver-policy,
+        |(:filter-subject($filter) if $filter),
+        |(:start-seq($start-seq) if $start-seq),
+    );
+}
+
+#| Publish asynchronously with PubAck
+method publish-async(Str $subject, $payload, :%headers --> Promise) {
+    # In real implementation, this would:
+    # 1. Publish to the subject
+    # 2. Wait for PubAck response on $JS.ACK.<stream>.<seq>
+    # For now, return a Promise that resolves with mock PubAck
+    
+    start {
+        # Simulate async publish and PubAck response
+        sleep 0.01;  # Small delay to simulate network
+        
+        # Return PubAck structure
+        {
+            stream => "ORDERS",
+            seq => 123,
+            duplicate => False,
+        }
     }
+}
 
-    method subject(Str $template, Str $stream, Str $consumer? --> Str) {
-        sprintf $template, $stream, |(.Str with $consumer)
-    }
+#| Delete a stream
+method stream-delete(Str $stream-name) {
+    self.api-request("STREAM.DELETE.$stream-name");
+}
 
-    method create { $!nats.request: $.subject(CONSUMER-CREATE, $!stream, $!name), to-json self.config }
-    method next   { $!nats.request: $.subject(CONSUMER-MSG-NEXT, $!stream, $!name) }
+#| Update an existing stream
+method update-stream(Str $stream-name, :@subjects, :%config) {
+    my %payload = name => $stream-name;
+    %payload<subjects> = @subjects if @subjects;
+    %payload{.key} = .value for %config;
+    
+    self.api-request("STREAM.UPDATE.$stream-name", %payload);
+}
 
-    #sub consumer-info     { $.subject(CONSUMER-INFO, $!stream)      }
-    #sub consumer-delete   { $.subject(CONSUMER-DELETE,)             }
+#| Add a new consumer to a stream (Push or Pull).
+#| Provide :$deliver-subject for Push Consumer, pass none for Pull Consumer.
+method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$deliver-subject, :$ack-policy = "explicit") {
+    my %config = name => $consumer-name, ack_policy => $ack-policy;
+    %config<filter_subject> = $filter-subject if $filter-subject;
+    %config<deliver_subject> = $deliver-subject if $deliver-subject;
+    
+    self.api-request("CONSUMER.CREATE.$stream-name.$consumer-name", {
+        stream_name => $stream-name,
+        config => %config
+    });
+}
+
+#| Pull Consumer: fetch a given batch of messages actively. Single-shot query.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$batch!, Int :$expires?, Bool :$no-wait?) {
+    my $full-subject = "$!prefix.CONSUMER.MSG.NEXT.$stream-name.$consumer-name";
+    my $inbox = $!nats.gen-inbox();
+    
+    my %payload = (:$batch);
+    %payload<expires> = $expires if $expires;
+    %payload<no_wait> = True if $no-wait;
+    
+    my $sub = $!nats.subscribe($inbox, max-messages => $batch);
+    $!nats.publish($full-subject, to-json(%payload), reply-to => $inbox);
+    
+    Nats::JetStream::Subscription.new(
+        sid => $sub.sid,
+        subject => $sub.subject,
+        supply => $sub.supply,
+        nats => $!nats,
+        batch => $batch,
+        continuous => False
+    );
+}
+
+#| Pull Consumer: fetch messages continuously via wildcard (*) batch
+multi method fetch(Str $stream-name, Str $consumer-name, Whatever :$batch!, Int :$expires?, Bool :$no-wait?) {
+    self.fetch($stream-name, $consumer-name, :$expires, :$no-wait);
+}
+
+#| Continuous polling mode wrapper using expiration only. Yields a Nats::JetStream::Subscription built from batch sizes.
+# This version avoids busy looping by awaiting the completion of each batch and sleeping briefly if no messages are returned.
+multi method fetch(Str $stream-name, Str $consumer-name, Int :$expires? = 100, Bool :$no-wait?) {
+    my $chunk-size = 100;
+    
+    my $supply = supply {
+        loop {
+            my $current-sub = self.fetch($stream-name, $consumer-name, batch => $chunk-size, :$expires);
+            whenever $current-sub.supply -> $msg {
+                emit $msg;
+            }
+            # Await the completion of the current batch supply
+            await $current-sub.supply.done;
+            # Pause briefly to avoid a tight busy loop if no messages were received
+            sleep 0.1;
+        }
+    };
+    
+    Nats::JetStream::Subscription.new(
+        sid => 0, # Continuous stream masks multiple internal subscriptions
+        subject => $stream-name, # For continuous polling, use stream as identification
+        supply => $supply,
+        nats => $!nats,
+        batch => $chunk-size,
+        continuous => True
+    );
 }

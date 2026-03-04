@@ -1,0 +1,59 @@
+use Test;
+use Test::Mock;
+use Nats::JetStream;
+use JSON::Fast;
+
+plan 6;
+
+class MockMessage {
+    has Str $.payload;
+}
+
+class MockNats {
+    has %!requests;
+    
+    method publish(Str $subject, Str $payload) { True }
+
+    # We will just capture the request and simulate a supply/promise response
+    method request(Str $subject, Str $payload) {
+        %!requests{$subject} = $payload;
+        # For simplicity in this test, return a resolved promise with a mock message
+        my $response = MockMessage.new(payload => '{"type": "io.nats.jetstream.api.v1.stream_info_response", "config": {"name": "MY_STREAM"}}');
+        Promise.kept($response);
+    }
+    
+    # We can also mock a failure from the NATS server point of view, or a JS API error
+    method request-with-error(Str $subject, Str $payload) {
+        my $response = MockMessage.new(payload => '{"error": {"code": 404, "description": "stream not found"}}');
+        Promise.kept($response);
+    }
+
+    method last-request { %!requests }
+}
+
+my $mock-nats = MockNats.new;
+my $js = Nats::JetStream.new(nats => $mock-nats);
+
+# Test basic object creation
+ok $js.defined, "Nats::JetStream object instantiated";
+is $js.prefix, '$JS.API', "Default prefix is correctly set to \$JS.API";
+
+# Test API request resolving correctly
+my $valid-resp = $js.api-request("STREAM.INFO.MY_STREAM");
+like $mock-nats.last-request{'$JS.API.STREAM.INFO.MY_STREAM'}, rx/ \{ \s* \} /, "api-request correctly sends empty JSON object when no payload is given";
+isa-ok $valid-resp<config>, Hash, "Response payload successfully parsed from JSON";
+is $valid-resp<config><name>, "MY_STREAM", "Correct data unmarshalled from the mock response";
+
+# Test API request returning an error from JetStream
+my $js-error = Nats::JetStream.new(nats => class :: is MockNats {
+    method request(Str $subject, Str $payload) {
+        self.request-with-error($subject, $payload);
+    }
+}.new);
+
+throws-like { $js-error.stream-info("NOT_FOUND") }, 
+    Exception,
+    message => /"stream not found"/,
+    "JetStream JS API errors inside JSON payload should throw an Exception";
+
+done-testing;

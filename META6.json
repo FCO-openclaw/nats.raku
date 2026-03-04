@@ -11,18 +11,23 @@
     "JSON::Fast",
     "URL"
   ],
-  "description": "NATS client for Raku",
+  "description": "A Raku client for NATS.io messaging system",
   "license": "Artistic-2.0",
   "name": "Nats",
   "perl": "6.d",
   "provides": {
     "Nats": "lib/Nats.rakumod",
     "Nats::Actions": "lib/Nats/Actions.rakumod",
+    "Nats::Auth": "lib/Nats/Auth.rakumod",
     "Nats::Client": "lib/Nats/Client.rakumod",
     "Nats::Data": "lib/Nats/Data.rakumod",
     "Nats::Error": "lib/Nats/Error.rakumod",
     "Nats::Grammar": "lib/Nats/Grammar.rakumod",
     "Nats::JetStream": "lib/Nats/JetStream.rakumod",
+    "Nats::JetStream::Ackable": "lib/Nats/JetStream/Ackable.rakumod",
+    "Nats::JetStream::Client": "lib/Nats/JetStream/Client.rakumod",
+    "Nats::JetStream::Subscription": "lib/Nats/JetStream/Subscription.rakumod",
+    "Nats::JetStream::Subscriptions": "lib/Nats/JetStream/Subscriptions.rakumod",
     "Nats::Message": "lib/Nats/Message.rakumod",
     "Nats::Replyable": "lib/Nats/Replyable.rakumod",
     "Nats::Subscription": "lib/Nats/Subscription.rakumod",
@@ -30,7 +35,7 @@
   },
   "resources": [
   ],
-  "source-url": "https://github.com/FCO/nats.git",
+  "source-url": "https://github.com/FCO-openclaw/nats.raku.git",
   "tags": [
   ],
   "test-depends": [

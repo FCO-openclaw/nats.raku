@@ -1,0 +1,104 @@
+use v6;
+use Test;
+use Test::Mock;
+
+use Nats::JetStream;
+
+my class MockMessage {
+    has $.payload;
+    method payload() { $!payload }
+}
+
+my class MockNats {
+    has $.last-subject;
+    has $.last-payload;
+    
+    method request($subject, $payload) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
+        
+        return Supply.from-list([
+            MockMessage.new(payload => '{"success": true, "purged": 100}')
+        ]);
+    }
+}
+
+# Test 1: stream-purge purges all messages
+subtest "stream-purge() purges all messages from stream", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-purge("ORDERS");
+    
+    is $mock-nats.last-subject, '$JS.API.STREAM.PURGE.ORDERS', "Correct API subject";
+    ok $result<success>, "Purge successful";
+    is $result<purged>, 100, "100 messages purged";
+};
+
+# Test 2: stream-purge with filter subject
+subtest "stream-purge() with filter subject", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-purge("ORDERS", :filter<orders.old.>);
+    
+    # Check payload contains filter
+    like $mock-nats.last-payload, /"filter"/, "Payload contains filter";
+    like $mock-nats.last-payload, /orders\.old/, "Filter subject correct";
+};
+
+# Test 3: stream-purge with sequence
+subtest "stream-purge() up to sequence", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-purge("ORDERS", :seq(1000));
+    
+    like $mock-nats.last-payload, /"seq"/, "Payload contains seq";
+    like $mock-nats.last-payload, /1000/, "Sequence number correct";
+};
+
+# Test 4: stream-purge with keep
+subtest "stream-purge() keep recent messages", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-purge("ORDERS", :keep(100));
+    
+    like $mock-nats.last-payload, /"keep"/, "Payload contains keep";
+    like $mock-nats.last-payload, /100/, "Keep count correct";
+};
+
+# Test 5: combined purge options
+subtest "stream-purge() with multiple options", {
+    my $mock-nats = MockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    my $result = $js.stream-purge("ORDERS", 
+        :filter<orders.completed.>,
+        :keep(10)
+    );
+    
+    like $mock-nats.last-payload, /"filter"/, "Payload contains filter";
+    like $mock-nats.last-payload, /"keep"/, "Payload contains keep";
+};
+
+# Test 6: stream-purge throws on non-existent stream
+subtest "stream-purge() fails for non-existent stream", {
+    my class FailingMockNats {
+        method request($subject, $payload) {
+            return Supply.from-list([
+                MockMessage.new(payload => '{"error": {"code": 404, "description": "stream not found"}}')
+            ]);
+        }
+    }
+    
+    my $mock-nats = FailingMockNats.new;
+    my $js = Nats::JetStream.new(nats => $mock-nats);
+    
+    throws-like { $js.stream-purge("NONEXISTENT") }, Exception,
+        message => /"stream not found"/,
+        'Throws for non-existent stream';
+};
+
+done-testing;

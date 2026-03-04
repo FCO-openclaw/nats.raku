@@ -1,0 +1,58 @@
+use Test;
+use Test::Mock;
+use Nats::JetStream;
+use JSON::Fast;
+
+plan 4;
+
+class MockMessage {
+    has Str $.payload;
+    has Str $.reply-to;
+}
+
+class MockNats {
+    has %!requests;
+    
+    method publish(Str $subject, Str $payload, :$reply-to) { 
+        %!requests{$subject} = $payload;
+        True 
+    }
+
+    method request(Str $subject, Str $payload, :$reply-to) {}
+
+    method subscribe(Str $inbox, :$max-messages) {
+        my $response = MockMessage.new(
+            payload => '{"foo": "bar"}', 
+            reply-to => '$JS.ACK.EVENTS.WORKER_2.1.2.3'
+        );
+        # Mocks a subscription object with a supply attribute 
+        # (This avoids complex internal NATS mocking and focuses on $js.fetch logic)
+        class MockSub { 
+            has $.supply; 
+            has $.sid = 42;
+            has Str $.subject = "MOCK_SUBJ";
+        }.new(supply => Supply.from-list([$response]))
+    }
+
+    method gen-inbox() { '_INBOX.MOCK' }
+
+    method last-request { %!requests }
+}
+
+my $mock-nats = MockNats.new;
+my $js = Nats::JetStream.new(nats => $mock-nats);
+
+# Test: Fetching messages (Pull Consumer returning a Nats::JetStream::Subscription)
+my $fetch-sub = $js.fetch("EVENTS", "WORKER_2", batch => 2);
+isa-ok $fetch-sub, Nats::JetStream::Subscription, "fetch() returns a Nats::JetStream::Subscription object";
+
+my $msg = await $fetch-sub.supply.Promise; # Await the first element of the supply
+
+like $mock-nats.last-request{'$JS.API.CONSUMER.MSG.NEXT.EVENTS.WORKER_2'}, 
+     rx/ '"batch"' \s* ':' \s* 2 /, 
+     "Pull request sent to correct subject with batch size JSON";
+
+ok $msg.defined, "Received a pulled message from the consumer Supply";
+is $msg.payload, '{"foo": "bar"}', "Payload of the pulled message is correct";
+
+done-testing;
