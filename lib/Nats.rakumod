@@ -293,6 +293,30 @@ has %!server-info;  # To store server info, including nonce for JWT auth
 
 has Bool() $!DEBUG = %*ENV<NATS_DEBUG>;
 
+# TLS configuration
+has Str $.tls-ca-file;
+has Str $.tls-cert-file;
+has Str $.tls-key-file;
+has Bool $.tls-verify = True;
+
+# Authentication
+has Str $.jwt;
+has Str $.nkey-seed;
+has Str $.creds-file;
+has Str $.token;
+has Str $.user;
+has Str $.password;
+
+# Connection options
+has Bool $.reconnect = True;
+has Int $.max-reconnect = 10;
+has Rat $.reconnect-delay = 1.0;
+has Rat $.reconnect-delay-max = 60.0;
+has Rat $.reconnect-jitter = 0.5;
+has Rat $.connect-timeout = 5.0;
+has Int $.ping-interval = 120;
+has Int $.max-pings-out = 2;
+
 method default-url { URL.new: %*ENV<NATS_URL> // "nats://127.0.0.1:4222" }
 
 # Constructor with auth support
@@ -349,6 +373,17 @@ method start {
 
 method stop {
     $!conn.result.close;
+}
+
+method drain(:$timeout = 30) {
+    # Graceful shutdown - process pending messages
+    # In a real implementation, this would:
+    # 1. Stop accepting new subscriptions
+    # 2. Wait for pending messages to be processed
+    # 3. Close connection
+    
+    # For now, just close the connection
+    self.stop;
 }
 
 method handle-input {

@@ -13,13 +13,18 @@ my class MockNats {
     has $.last-subject;
     has $.last-payload;
     
-    method request($subject, $payload) {
+    method request($subject, $payload?) {
         $!last-subject = $subject;
-        $!last-payload = $payload;
+        $!last-payload = $payload // '';
         
         return Supply.from-list([
             MockMessage.new(payload => '{"success": true, "purged": 100}')
         ]);
+    }
+    
+    method publish($subject, $payload, :$reply-to) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
     }
 }
 
@@ -86,10 +91,14 @@ subtest "stream-purge() with multiple options", {
 # Test 6: stream-purge throws on non-existent stream
 subtest "stream-purge() fails for non-existent stream", {
     my class FailingMockNats {
-        method request($subject, $payload) {
+        method request($subject, $payload?) {
             return Supply.from-list([
                 MockMessage.new(payload => '{"error": {"code": 404, "description": "stream not found"}}')
             ]);
+        }
+        
+        method publish($subject, $payload, :$reply-to) {
+            # Do nothing
         }
     }
     

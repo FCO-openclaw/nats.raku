@@ -7,6 +7,7 @@ unit class Nats::Message;
 has Str  $.subject;
 has UInt $.sid;
 has Str  $.payload;
+has %.headers;
 has $.nats is required where { .^can('publish') }
 has Str $.reply-to is rw;  # Atributo explícito para reply-to
 
@@ -31,4 +32,12 @@ method TWEAK(Str :$reply-to) {
 
 method json() {
     from-json($!payload);
+}
+
+method get(Str $key) {
+    %!headers{$key}
+}
+
+method set(Str $key, $value) {
+    %!headers{$key} = $value;
 }

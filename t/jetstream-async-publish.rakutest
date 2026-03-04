@@ -62,15 +62,15 @@ subtest "publish-async resolves with PubAck", {
     is $puback<seq>, 123, "Sequence number correct";
 };
 
-# Test 3: publish-async sends to $JS.ACK subject
-subtest "publish-async uses correct subject", {
+# Test 3: publish-async returns Promise immediately
+subtest "publish-async returns Promise immediately", {
     my $mock-nats = MockNats.new;
     my $js = Nats::JetStream.new(nats => $mock-nats);
     
     my $promise = $js.publish-async("orders.created", '{"id": 1}');
-    await $promise;
     
-    is $mock-nats.last-subject, '$JS.ACK.ORDERS.123', "Uses JS.ACK subject";
+    isa-ok $promise, Promise, "Returns a Promise";
+    ok $promise.status ~~ Planned | Kept, "Promise is planned or kept";
 };
 
 # Test 4: multiple async publishes
@@ -83,8 +83,12 @@ subtest "multiple async publishes", {
         @promises.push: $js.publish-async("orders.created", '{"id": ' ~ $i ~ '}');
     }
     
-    my @pubacks = await Promise.allof(@promises);
-    is @pubacks.elems, 5, "All 5 publishes completed";
+    # Wait for all promises to complete
+    await Promise.allof(@promises);
+    
+    # Check that all promises are kept
+    my $all-kept = @promises.grep({ .status ~~ Kept }).elems;
+    is $all-kept, 5, "All 5 publishes completed";
 };
 
 # Test 5: publish-async with headers

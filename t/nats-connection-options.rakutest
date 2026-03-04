@@ -22,19 +22,17 @@ subtest "Nats.new accepts TLS options", {
 # Test 2: Nats.new with JWT authentication
 subtest "Nats.new with JWT authentication", {
     my $nats = Nats.new(
-        servers => ["nats://localhost:4222"],
-        jwt => "eyJhbGciOiJIUzI1NiIs...",
+        jwt-path => "/path/to/jwt.creds",
         nkey-seed => "SUAM..."
     );
     
-    is $nats.jwt, "eyJhbGciOiJIUzI1NiIs...", "JWT set";
+    is $nats.jwt-path, "/path/to/jwt.creds", "JWT path set";
     is $nats.nkey-seed, "SUAM...", "NKey seed set";
 };
 
 # Test 3: Nats.new with credentials file
 subtest "Nats.new with credentials file", {
     my $nats = Nats.new(
-        servers => ["nats://localhost:4222"],
         creds-file => "/path/to/mycreds.creds"
     );
     
@@ -44,19 +42,18 @@ subtest "Nats.new with credentials file", {
 # Test 4: Reconnection options
 subtest "Nats.new with reconnection options", {
     my $nats = Nats.new(
-        servers => ["nats://localhost:4222"],
         reconnect => True,
         max-reconnect => 10,
-        reconnect-delay => 1.0,
-        reconnect-delay-max => 60.0,
-        reconnect-jitter => 0.5
+        reconnect-delay => 2.0,
+        reconnect-delay-max => 120.0,
+        reconnect-jitter => 1.0
     );
     
     ok $nats.reconnect, "Reconnection enabled";
     is $nats.max-reconnect, 10, "Max reconnect set";
-    is $nats.reconnect-delay, 1.0, "Reconnect delay set";
-    is $nats.reconnect-delay-max, 60.0, "Max reconnect delay set";
-    is $nats.reconnect-jitter, 0.5, "Reconnect jitter set";
+    is $nats.reconnect-delay, 2.0, "Reconnect delay set";
+    is $nats.reconnect-delay-max, 120.0, "Max reconnect delay set";
+    is $nats.reconnect-jitter, 1.0, "Reconnect jitter set";
 };
 
 # Test 5: Connection timeout options

@@ -13,9 +13,9 @@ my class MockNats {
     has $.last-subject;
     has $.last-payload;
     
-    method request($subject, $payload) {
+    method request($subject, $payload?) {
         $!last-subject = $subject;
-        $!last-payload = $payload;
+        $!last-payload = $payload // '';
         
         given $subject {
             when /CONSUMER\.LIST/ {
@@ -33,10 +33,25 @@ my class MockNats {
                     MockMessage.new(payload => '{"paused": true}')
                 ]);
             }
+            when /CONSUMER\.RESUME/ {
+                return Supply.from-list([
+                    MockMessage.new(payload => '{"resumed": true}')
+                ]);
+            }
+            when /CONSUMER\.STEPDOWN/ {
+                return Supply.from-list([
+                    MockMessage.new(payload => '{"success": true}')
+                ]);
+            }
             default {
                 return Supply.from-list([MockMessage.new(payload => '{"success": true}')]);
             }
         }
+    }
+    
+    method publish($subject, $payload, :$reply-to) {
+        $!last-subject = $subject;
+        $!last-payload = $payload;
     }
 }
 
