@@ -1,3 +1,182 @@
+=begin pod
+
+=head1 NAME
+
+Nats - A Raku client for NATS.io messaging system
+
+=head1 SYNOPSIS
+
+=begin code
+use Nats;
+
+# Basic connection
+my $nats = Nats.new(servers => ["nats://localhost:4222"]);
+await $nats.start;
+
+# Publish messages
+$nats.publish("hello.world", "Hello from Raku!");
+
+# Subscribe to messages
+my $sub = $nats.subscribe("hello.>");
+$sub.supply.tap(-> $msg {
+    say "Received: $msg.payload() on $msg.subject()";
+});
+
+# Request/Reply pattern
+my $response = await $nats.request("service.status", "ping").head;
+say "Service response: $response.payload()";
+
+# JetStream support
+my $js = Nats::JetStream.new(nats => $nats);
+$js.add-stream("ORDERS", subjects => ["orders.>"]);
+=end code
+
+=head1 DESCRIPTION
+
+Nats is a Raku client for the NATS.io messaging system, a lightweight,
+high-performance cloud native messaging system. This module provides:
+
+=item Core NATS protocol support (publish, subscribe, request/reply)
+=item JetStream support for persistent messaging
+=item Authentication (Token, Username/Password, JWT/NKeys)
+=item Asynchronous messaging via Supplies
+
+=head1 ATTRIBUTES
+
+=head2 socket-class
+
+The socket class to use for connections. Defaults to C<IO::Socket::Async>.
+
+=head2 servers
+
+Array of NATS server URLs to connect to. Defaults to C<nats://127.0.0.1:4222>
+or the C<NATS_URL> environment variable.
+
+=head2 supply
+
+A Supply that emits L<Nats::Message> objects for incoming messages.
+
+=head1 METHODS
+
+=head2 new
+
+Creates a new NATS connection.
+
+=begin code
+# Basic
+my $nats = Nats.new;
+
+# With multiple servers
+my $nats = Nats.new(servers => ["nats://server1:4222", "nats://server2:4222"]);
+
+# With authentication
+my $nats = Nats.new(
+    servers => ["nats://localhost:4222"],
+    token => "my-secret-token"
+);
+
+# With JWT auth
+my $nats = Nats.new(
+    jwt-path => "/path/to/jwt.creds",
+    nkey-seed => "SU..."
+);
+=end code
+
+=head2 start
+
+Starts the connection to the NATS server.
+
+=begin code
+my $nats = Nats.new;
+await $nats.start;
+=end code
+
+=head2 stop
+
+Closes the connection.
+
+=begin code
+$nats.stop;
+=end code
+
+=head2 subscribe
+
+Subscribes to a subject pattern.
+
+=begin code
+# Simple subscription
+my $sub = $nats.subscribe("foo.>");
+$sub.supply.tap(-> $msg { say $msg.payload() });
+
+# With queue group
+my $sub = $nats.subscribe("tasks", :queue("workers"));
+
+# With max messages
+my $sub = $nats.subscribe("notifications", :max-messages(10));
+=end code
+
+=head2 publish
+
+Publishes a message to a subject.
+
+=begin code
+$nats.publish("orders.created", "Order #12345");
+
+# With reply-to
+$nats.publish("service.request", "data", :reply-to("_INBOX.123"));
+=end code
+
+=head2 request
+
+Sends a request and returns a Supply with responses.
+
+=begin code
+my $response = await $nats.request("service.echo", "hello").head;
+say $response.payload();
+
+# Request with multiple responses
+$nats.request("service.status", "ping", :max-messages(5)).tap(-> $msg {
+    say "Response from: $msg.subject()";
+});
+=end code
+
+=head2 ping
+
+Sends a PING to the server.
+
+=begin code
+$nats.ping;
+=end code
+
+=head2 stream
+
+Creates a L<Nats::Stream> object.
+
+=begin code
+my $stream = $nats.stream("events", "events.created", "events.updated");
+=end code
+
+=head1 ENVIRONMENT
+
+=item NATS_URL - Default NATS server URL
+=item NATS_DEBUG - Enable debug output
+
+=head1 SEE ALSO
+
+=item L<Nats::JetStream> - JetStream support
+=item L<Nats::Message> - Message objects
+=item L<Nats::Subscription> - Subscriptions
+
+=head1 AUTHOR
+
+Fernando Correa de Oliveira <fco@cpan.org>
+
+=head1 LICENSE
+
+Artistic-2.0
+
+=end pod
+
 unit class Nats;
 use URL;
 use JSON::Fast;

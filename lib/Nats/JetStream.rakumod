@@ -1,3 +1,188 @@
+=begin pod
+
+=head1 NAME
+
+Nats::JetStream - JetStream support for NATS.io in Raku
+
+=head1 SYNOPSIS
+
+=begin code
+use Nats;
+use Nats::JetStream;
+
+my $nats = Nats.new(servers => ["nats://localhost:4222"]);
+my $js = Nats::JetStream.new(nats => $nats);
+
+# Stream Management
+$js.add-stream("ORDERS", subjects => ["orders.>"]);
+my $info = $js.stream-info("ORDERS");
+my @streams = $js.stream-names();
+$js.stream-delete("ORDERS");
+
+# Consumer Management
+$js.add-consumer("ORDERS", "processor", filter-subject => "orders.created");
+my $consumer = $js.consumer-info("ORDERS", "processor");
+
+# Pull Messages
+my $sub = $js.fetch("ORDERS", "processor", batch => 10);
+$sub.supply.tap(-> $msg {
+    say "Received: $msg.payload()";
+    $msg.ack();
+});
+=end code
+
+=head1 DESCRIPTION
+
+This module provides JetStream support for the NATS.io messaging system in Raku.
+JetStream is a streaming platform built on top of NATS that enables:
+
+=item At-least-once delivery
+=item Stream persistence
+=item Replay capabilities
+=item Consumer groups
+=item Exactly-once processing semantics
+
+=head1 STREAM MANAGEMENT
+
+=head2 method add-stream
+
+Creates a new JetStream stream.
+
+=begin code
+method add-stream(Str $stream-name, :@subjects)
+=end code
+
+B<Parameters:>
+=item $stream-name - Name of the stream
+=item :@subjects - Array of subject patterns to capture
+
+=head2 method stream-info
+
+Get information about a specific stream.
+
+=begin code
+method stream-info(Str $stream-name)
+=end code
+
+=head2 method stream-list
+
+List all streams.
+
+=begin code
+method stream-list()
+=end code
+
+=head2 method stream-names
+
+Get an array of all stream names (convenience method).
+
+=begin code
+method stream-names()
+=end code
+
+=head2 method stream-delete
+
+Delete a stream and all its data.
+
+=begin code
+method stream-delete(Str $stream-name)
+=end code
+
+=head2 method update-stream
+
+Update an existing stream's configuration.
+
+=begin code
+method update-stream(Str $stream-name, :@subjects, :%config)
+=end code
+
+B<Parameters:>
+=item $stream-name - Name of the stream to update
+=item :@subjects - New subject patterns (optional)
+=item :%config - Additional configuration options (optional)
+
+B<Example:>
+=begin code
+$js.update-stream("ORDERS", subjects => ["orders.>", "returns.>"]);
+=end code
+
+=head1 CONSUMER MANAGEMENT
+
+=head2 method add-consumer
+
+Add a consumer to a stream.
+
+=begin code
+method add-consumer(Str $stream-name, Str $consumer-name, :$filter-subject, :$deliver-subject, :$ack-policy = "explicit")
+=end code
+
+B<Parameters:>
+=item $stream-name - Name of the stream
+=item $consumer-name - Name of the consumer
+=item :$filter-subject - Only receive messages matching this subject (optional)
+=item :$deliver-subject - Subject for push delivery (for push consumers)
+=item :$ack-policy - Acknowledgment policy: "explicit", "none", or "all" (default: "explicit")
+
+B<Examples:>
+=begin code
+# Pull consumer
+$js.add-consumer("ORDERS", "processor", filter-subject => "orders.created");
+
+# Push consumer
+$js.add-consumer("ORDERS", "notifier", 
+    filter-subject => "orders.urgent",
+    deliver-subject => "notifications.urgent"
+);
+=end code
+
+=head2 method consumer-info
+
+Get information about a consumer.
+
+=begin code
+method consumer-info(Str $stream-name, Str $consumer-name)
+=end code
+
+=head2 method consumer-delete
+
+Delete a consumer from a stream.
+
+=begin code
+method consumer-delete(Str $stream-name, Str $consumer-name)
+=end code
+
+=head2 method consumer-list
+
+List all consumers for a stream.
+
+=begin code
+method consumer-list(Str $stream-name)
+=end code
+
+=head1 PULL CONSUMERS
+
+=head2 method fetch
+
+Fetch messages from a pull consumer.
+
+=begin code
+# Single batch
+method fetch(Str $stream-name, Str $consumer-name, Int :$batch!, Int :$expires?, Bool :$no-wait?)
+
+# Continuous polling
+method fetch(Str $stream-name, Str $consumer-name, Int :$expires? = 100, Bool :$no-wait?)
+=end code
+
+=head1 AUTHOR
+
+Fernando Correa de Oliveira <fco@cpan.org>
+
+=head1 LICENSE
+
+Artistic-2.0
+
+=end pod
+
 use JSON::Fast;
 use Nats::JetStream::Subscription;
 
@@ -49,6 +234,33 @@ method add-stream(Str $stream-name, :@subjects) {
         name => $stream-name,
         subjects => @subjects
     });
+}
+
+#| List all streams
+method stream-list() {
+    self.api-request("STREAM.LIST");
+}
+
+#| Get array of stream names (convenience method)
+method stream-names() {
+    my $response = self.stream-list();
+    my $streams = $response<streams>;
+    # Ensure we return a proper Array
+    return $streams.defined ?? ($streams ~~ Positional ?? $streams.list !! [$streams]) !! [];
+}
+
+#| Delete a stream
+method stream-delete(Str $stream-name) {
+    self.api-request("STREAM.DELETE.$stream-name");
+}
+
+#| Update an existing stream
+method update-stream(Str $stream-name, :@subjects, :%config) {
+    my %payload = name => $stream-name;
+    %payload<subjects> = @subjects if @subjects;
+    %payload{.key} = .value for %config;
+    
+    self.api-request("STREAM.UPDATE.$stream-name", %payload);
 }
 
 #| Info on a specific consumer
