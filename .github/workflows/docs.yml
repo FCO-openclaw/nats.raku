@@ -19,7 +19,7 @@ jobs:
       - name: Setup Raku
         run: |
           sudo apt-get update
-          sudo apt-get install -y rakudo
+          sudo apt-get install -y rakudo pandoc
           
           # Install zef
           git clone https://github.com/ugexe/zef.git /tmp/zef
@@ -32,41 +32,70 @@ jobs:
           export PATH="$HOME/.raku/bin:$PATH"
           zef install --/test Pod::To::Markdown || true
 
-      - name: Generate Markdown from POD6
+      - name: Generate Documentation
         run: |
           export PATH="$HOME/.raku/bin:$PATH"
           mkdir -p _site/api
           
-          # Generate markdown for each .rakumod file
+          # Generate markdown for each .rakumod file and convert to HTML
           find lib -name "*.rakumod" | while read file; do
             module_name=$(echo "$file" | sed 's|lib/||' | sed 's|/|::|g' | sed 's|.rakumod||')
-            output_file=$(echo "$file" | sed 's|lib/||' | sed 's|/|_|g' | sed 's|.rakumod|.md|')
+            output_file=$(echo "$file" | sed 's|lib/||' | sed 's|/|_|g' | sed 's|.rakumod|.html|')
             
             echo "Processing: $file -> $output_file"
             
-            # Try to convert POD to Markdown
+            # Convert POD to Markdown first
             raku -e "
               use Pod::To::Markdown;
               my \$pod = Pod::Load.load('$file');
               print Pod::To::Markdown.render(\$pod);
-            " > "_site/api/$output_file" 2>/dev/null || echo "# $module_name\n\nPOD documentation for $module_name" > "_site/api/$output_file"
+            " > "/tmp/$output_file.md" 2>/dev/null || echo "# $module_name
+
+POD documentation for $module_name" > "/tmp/$output_file.md"
+            
+            # Convert Markdown to HTML
+            pandoc "/tmp/$output_file.md" -o "_site/api/$output_file" --standalone --toc \
+              --template="<html><head><title>$module_name</title><style>body{font-family:sans-serif;max-width:800px;margin:2em auto;line-height:1.6}</style></head><body>\$body\</body></html>"
           done
           
-          # Generate index
-          echo "# Nats.raku API Documentation" > _site/api/index.md
-          echo "" >> _site/api/index.md
-          echo "## Modules" >> _site/api/index.md
-          echo "" >> _site/api/index.md
+          # Generate API index
+          cat > _site/api/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>Nats.raku API Documentation</title>
+            <style>
+              body { font-family: sans-serif; max-width: 800px; margin: 2em auto; line-height: 1.6; }
+              h1 { color: #333; }
+              ul { list-style: none; padding: 0; }
+              li { margin: 0.5em 0; }
+              a { color: #0066cc; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <h1>Nats.raku API Documentation</h1>
+            <h2>Modules</h2>
+            <ul>
+          EOF
           
-          for file in _site/api/*.md; do
-            if [ "$(basename $file)" != "index.md" ]; then
-              name=$(basename $file .md | sed 's|_|::|g')
-              echo "- [$name]($(basename $file))" >> _site/api/index.md
+          for file in _site/api/*.html; do
+            if [ "$(basename $file)" != "index.html" ]; then
+              name=$(basename $file .html | sed 's|_|::|g')
+              echo "<li><a href=\"$(basename $file)\">$name</a></li>" >> _site/api/index.html
             fi
           done
           
-          # Copy README as main page
-          cp README.md _site/index.md 2>/dev/null || echo "# Nats.raku" > _site/index.md
+          cat >> _site/api/index.html << 'EOF'
+            </ul>
+            <p><a href="/">← Back to main documentation</a></p>
+          </body>
+          </html>
+          EOF
+          
+          # Convert README to HTML for main page
+          pandoc README.md -o _site/index.html --standalone --toc \
+            --template="<html><head><title>Nats.raku</title><style>body{font-family:sans-serif;max-width:800px;margin:2em auto;line-height:1.6}a{color:#0066cc}</style></head><body>\$body\<hr><p><a href='/api/'>API Documentation →</a></p></body></html>"
           
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
