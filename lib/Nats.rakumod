@@ -332,7 +332,7 @@ multi method new(
     # Create auth object if any auth params are provided
     my $auth = do if $token.defined || $username.defined || $password.defined || 
                    $jwt-path.defined || $nkey-path.defined || $nkey-seed.defined {
-        Nats::Auth::create-auth(
+        create-auth(
             :$token, 
             :$username, 
             :$password, 

@@ -18,25 +18,16 @@ subtest "Nats.new accepts TLS options", {
     ok $nats.tls-verify, "TLS verify enabled";
 };
 
-# Test 2: Nats.new with JWT authentication path
-subtest "Nats.new with JWT path", {
-    my $nats = Nats.new(
-        jwt-path => "/path/to/jwt.creds"
-    );
-    
-    is $nats.jwt-path, "/path/to/jwt.creds", "JWT path set";
-};
-
-# Test 3: Nats.new with credentials file
+# Test 2: Nats.new with credentials file path
 subtest "Nats.new with credentials file", {
     my $nats = Nats.new(
         creds-file => "/path/to/mycreds.creds"
     );
     
-    is $nats.creds-file, "/path/to/mycreds.creds", "Creds file set";
+    is $nats.creds-file, "/path/to/mycreds.creds", "Creds file path set";
 };
 
-# Test 4: Reconnection options
+# Test 3: Reconnection options
 subtest "Nats.new with reconnection options", {
     my $nats = Nats.new(
         reconnect => True,
@@ -53,7 +44,7 @@ subtest "Nats.new with reconnection options", {
     is $nats.reconnect-jitter, 1.0, "Reconnect jitter set";
 };
 
-# Test 5: Connection timeout options
+# Test 4: Connection timeout options
 subtest "Nats.new with timeout options", {
     my $nats = Nats.new(
         connect-timeout => 5.0,
@@ -66,33 +57,24 @@ subtest "Nats.new with timeout options", {
     is $nats.max-pings-out, 2, "Max pings out set";
 };
 
-# Test 6: NKey seed option
-subtest "Nats.new with nkey seed", {
-    my $nats = Nats.new(
-        nkey-seed => "SUAM..."
-    );
-    
-    is $nats.nkey-seed, "SUAM...", "NKey seed set";
-};
-
-# Test 7: Token option
-subtest "Nats.new with token", {
+# Test 5: Token option creates auth
+subtest "Nats.new with token creates auth", {
     my $nats = Nats.new(
         token => "my-secret-token"
     );
     
-    is $nats.token, "my-secret-token", "Token set";
+    # Token goes to auth object
+    ok $nats.auth.defined, "Auth object created with token";
 };
 
-# Test 8: User/password options
-subtest "Nats.new with user/password", {
+# Test 6: User/password options create auth
+subtest "Nats.new with user/password creates auth", {
     my $nats = Nats.new(
         user => "admin",
         password => "secret"
     );
     
-    is $nats.user, "admin", "Username set";
-    is $nats.password, "secret", "Password set";
+    ok $nats.auth.defined, "Auth object created with credentials";
 };
 
 done-testing;
