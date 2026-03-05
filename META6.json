@@ -26,6 +26,7 @@
     "Nats::JetStream": "lib/Nats/JetStream.rakumod",
     "Nats::JetStream::Ackable": "lib/Nats/JetStream/Ackable.rakumod",
     "Nats::JetStream::Client": "lib/Nats/JetStream/Client.rakumod",
+    "Nats::JetStream::OrderedConsumer": "lib/Nats/JetStream/OrderedConsumer.rakumod",
     "Nats::JetStream::Subscription": "lib/Nats/JetStream/Subscription.rakumod",
     "Nats::JetStream::Subscriptions": "lib/Nats/JetStream/Subscriptions.rakumod",
     "Nats::Message": "lib/Nats/Message.rakumod",
