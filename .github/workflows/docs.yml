@@ -16,61 +16,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Create static HTML site
+      - name: Setup Raku
         run: |
+          sudo apt-get update
+          sudo apt-get install -y rakudo
+          
+          # Install zef
+          git clone https://github.com/ugexe/zef.git /tmp/zef
+          cd /tmp/zef
+          raku -I. bin/zef install .
+          echo "$HOME/.raku/bin" >> $GITHUB_PATH
+
+      - name: Install Raku dependencies
+        run: |
+          export PATH="$HOME/.raku/bin:$PATH"
+          zef install --/test Pod::To::HTML Pod::Load
+
+      - name: Generate HTML Documentation
+        run: |
+          export PATH="$HOME/.raku/bin:$PATH"
           mkdir -p _site
-          
-          # Create index.html
-          cat << 'HTMLEOF' > _site/index.html
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <title>Nats.raku</title>
-            <style>
-              body { font-family: sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; }
-              h1 { color: #2c3e50; }
-              a { color: #3498db; }
-            </style>
-          </head>
-          <body>
-            <h1>Nats.raku</h1>
-            <p>Raku client for NATS.io messaging system</p>
-            <p><a href="https://github.com/FCO-openclaw/nats.raku">GitHub Repository</a></p>
-            <p><a href="/api/">API Documentation</a></p>
-            <hr>
-            <p>See README on GitHub for full documentation.</p>
-          </body>
-          </html>
-          HTMLEOF
-          
-          # Create api/index.html
-          mkdir -p _site/api
-          cat << 'HTMLEOF' > _site/api/index.html
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <title>Nats.raku API</title>
-            <style>
-              body { font-family: sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; }
-              h1 { color: #2c3e50; }
-              a { color: #3498db; }
-            </style>
-          </head>
-          <body>
-            <h1>Nats.raku API Documentation</h1>
-            <p><a href="/">Back to main</a></p>
-            <hr>
-            <p>API documentation is available in the source files:</p>
-            <ul>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/tree/main/lib">lib/</a> - Core modules</li>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/tree/main/lib/Nats/JetStream">lib/Nats/JetStream/</a> - JetStream modules</li>
-            </ul>
-          </body>
-          </html>
-          HTMLEOF
-          
+          raku .github/scripts/generate-docs.raku
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
