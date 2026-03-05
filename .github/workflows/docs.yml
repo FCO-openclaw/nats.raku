@@ -16,88 +16,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Generate HTML Documentation
+      - name: Create static HTML site
         run: |
-          mkdir -p _site/api
+          mkdir -p _site
           
-          # Create main index.html from README
-          cat > _site/index.html << 'EOF'
+          # Create index.html
+          cat << 'HTMLEOF' > _site/index.html
           <!DOCTYPE html>
           <html>
           <head>
             <meta charset="UTF-8">
-            <title>Nats.raku - Raku client for NATS.io</title>
+            <title>Nats.raku</title>
             <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #333; }
-              h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 0.3em; }
-              h2 { color: #34495e; margin-top: 1.5em; }
-              code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: Consolas, monospace; }
-              pre { background: #f4f4f4; padding: 1em; border-radius: 5px; overflow-x: auto; }
-              a { color: #3498db; text-decoration: none; }
-              a:hover { text-decoration: underline; }
-              .header { background: #2c3e50; color: white; padding: 1em; margin: -2em -1em 2em -1em; }
-              .header a { color: #3498db; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1>Nats.raku</h1>
-              <p>Raku client for NATS.io messaging system</p>
-              <p><a href="https://github.com/FCO-openclaw/nats.raku">GitHub Repository</a></p>
-            </div>
-          EOF
-          
-          # Add README content
-          cat README.md | sed 's/^#/##/' | sed 's/```/~~~/' >> _site/index.html
-          
-          # Close HTML
-          cat >> _site/index.html << 'EOF'
-            <hr>
-            <p><a href="/api/">📚 API Documentation →</a></p>
-          </body>
-          </html>
-          EOF
-          
-          # Create API index
-          cat > _site/api/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <title>Nats.raku API Documentation</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #333; }
+              body { font-family: sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; }
               h1 { color: #2c3e50; }
-              ul { list-style: none; padding: 0; }
-              li { margin: 0.8em 0; padding: 0.5em; background: #f8f9fa; border-radius: 4px; }
-              a { color: #3498db; text-decoration: none; font-weight: 500; }
-              a:hover { text-decoration: underline; }
-              .back { margin-top: 2em; }
+              a { color: #3498db; }
             </style>
           </head>
           <body>
-            <h1>📚 Nats.raku API Documentation</h1>
-            <p>API documentation is generated from POD6 comments in the source code.</p>
-            
-            <h2>Core Modules</h2>
-            <ul>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats.rakumod">Nats</a> - Core NATS client</li>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats/JetStream.rakumod">Nats::JetStream</a> - JetStream support</li>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats/Client.rakumod">Nats::Client</a> - Structured client</li>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats/Subscriptions.rakumod">Nats::Subscriptions</a> - Subscription DSL</li>
-            </ul>
-            
-            <h2>JetStream Modules</h2>
-            <ul>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats/JetStream/Ackable.rakumod">Nats::JetStream::Ackable</a> - Message acknowledgments</li>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats/JetStream/Client.rakumod">Nats::JetStream::Client</a> - Structured JetStream client</li>
-              <li><a href="https://github.com/FCO-openclaw/nats.raku/blob/main/lib/Nats/JetStream/OrderedConsumer.rakumod">Nats::JetStream::OrderedConsumer</a> - Ordered consumers</li>
-            </ul>
-            
-            <p class="back"><a href="/">← Back to main documentation</a></p>
+            <h1>Nats.raku</h1>
+            <p>Raku client for NATS.io messaging system</p>
+            <p><a href="https://github.com/FCO-openclaw/nats.raku">GitHub Repository</a></p>
+            <p><a href="/api/">API Documentation</a></p>
+            <hr>
+            <p>See README on GitHub for full documentation.</p>
           </body>
           </html>
-          EOF
+          HTMLEOF
+          
+          # Create api/index.html
+          mkdir -p _site/api
+          cat << 'HTMLEOF' > _site/api/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <title>Nats.raku API</title>
+            <style>
+              body { font-family: sans-serif; max-width: 900px; margin: 2em auto; padding: 0 1em; }
+              h1 { color: #2c3e50; }
+              a { color: #3498db; }
+            </style>
+          </head>
+          <body>
+            <h1>Nats.raku API Documentation</h1>
+            <p><a href="/">Back to main</a></p>
+            <hr>
+            <p>API documentation is available in the source files:</p>
+            <ul>
+              <li><a href="https://github.com/FCO-openclaw/nats.raku/tree/main/lib">lib/</a> - Core modules</li>
+              <li><a href="https://github.com/FCO-openclaw/nats.raku/tree/main/lib/Nats/JetStream">lib/Nats/JetStream/</a> - JetStream modules</li>
+            </ul>
+          </body>
+          </html>
+          HTMLEOF
           
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
