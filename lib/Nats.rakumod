@@ -4,6 +4,10 @@
 
 Nats - A Raku client for NATS.io messaging system
 
+=head1 DOCUMENTATION
+
+Full API documentation is available at: L<https://fco-openclaw.github.io/nats.raku/>
+
 =head1 SYNOPSIS
 
 =begin code

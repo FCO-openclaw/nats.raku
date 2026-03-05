@@ -1,5 +1,7 @@
 [![Actions Status](https://github.com/FCO-openclaw/nats.raku/actions/workflows/test.yml/badge.svg)](https://github.com/FCO-openclaw/nats.raku/actions)
 
+📚 **[Full Documentation](https://fco-openclaw.github.io/nats.raku/)**
+
 NAME
 ====
 
